@@ -1,6 +1,6 @@
 {
-  "summary":  "Überarbeiteter Implementierungsplan für das QM-Tool Nachhaltigkeit: Selektive Auswahl der Prüfgrundsätze (DGNB, QNG, BNB sowie hochgeladene Custom-Standards) bei der Produkterfassung, um gezielt Tokens/Traffic zu sparen, sowie bedarfsgerechte Auswertung und synoptischer Bericht nur für die gewählten Standards.",
-  "updatedAt":  "2026-11-10T12:01:39.604877101Z",
+  "summary":  "Detaillierter Implementierungsplan zur vollständigen Umbenennung und Vereinheitlichung der Applikation auf 'QM-Tool Nachhaltigkeit' anstelle von 'DGNB ENV1.2'. Berücksichtigt die bestätigten Entscheidungen zur Beibehaltung von DGNB ENV1.2 als spezifischem Fachkriterium im Multi-Standard-Katalog sowie die konsistente Aktualisierung des Sicherheits- und Authentifizierungsbereichs.",
+  "updatedAt":  "2026-11-10T12:29:51.255908009Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

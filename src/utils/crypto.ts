@@ -3,7 +3,8 @@
  * Uses PBKDF2 (100,000 iterations, SHA-256) and AES-GCM (256-bit).
  */
 
-const KNOWN_VERIFICATION_PAYLOAD = 'DGNB-ENV12-VAULT-OK-2023';
+const KNOWN_VERIFICATION_PAYLOAD = 'QM-TOOL-NACHHALTIGKEIT-VAULT-2024';
+const LEGACY_VERIFICATION_PAYLOAD = 'DGNB-ENV12-VAULT-OK-2023';
 
 function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -99,7 +100,8 @@ export async function verifyPassphrase(
     );
 
     const decoder = new TextDecoder();
-    return decoder.decode(decrypted) === KNOWN_VERIFICATION_PAYLOAD;
+    const payloadStr = decoder.decode(decrypted);
+    return payloadStr === KNOWN_VERIFICATION_PAYLOAD || payloadStr === LEGACY_VERIFICATION_PAYLOAD;
   } catch {
     // Decryption failed due to wrong passphrase (AES-GCM authentication tag mismatch)
     return false;

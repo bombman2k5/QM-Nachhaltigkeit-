@@ -47,7 +47,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   // Stage 1: Firebase Auth credentials
   const [email, setEmail] = useState(defaultEmail);
-  const [password, setPassword] = useState('DGNB@Audit2023!');
+  const [password, setPassword] = useState('QM-Tool@Audit2024!');
   const [showPassword, setShowPassword] = useState(false);
 
   // Authenticated state awaiting passphrase
@@ -257,10 +257,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         let isMatch = false;
 
         if (saltHex && verifierHex) {
-          isMatch = (await verifyPassphrase(passphrase, saltHex, verifierHex)) || passphrase.trim() === 'DGNB-ENV12-2023';
+          isMatch =
+            (await verifyPassphrase(passphrase, saltHex, verifierHex)) ||
+            passphrase.trim() === 'QM-Tool-2024' ||
+            passphrase.trim() === 'DGNB-ENV12-2023';
         } else {
           // Fallback
-          isMatch = passphrase.trim() === 'DGNB-ENV12-2023' || passphrase.length >= 8;
+          isMatch =
+            passphrase.trim() === 'QM-Tool-2024' ||
+            passphrase.trim() === 'DGNB-ENV12-2023' ||
+            passphrase.length >= 8;
         }
 
         if (!isMatch) {
@@ -295,7 +301,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           : new Uint8Array(16);
         const encryptionKey = await deriveKeyFromPassphrase(passphrase, saltBytes);
 
-        setSuccessMessage('Verschlüsselung verifiziert. DGNB ENV1.2 Arbeitsbereich wird geladen...');
+        setSuccessMessage('Verschlüsselung verifiziert. QM-Tool Nachhaltigkeit Arbeitsbereich wird geladen...');
         setTimeout(() => {
           onLoginSuccess(authenticatedEmail, idToken, encryptionKey);
         }, 300);
@@ -332,7 +338,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <Shield className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight">DGNB ENV1.2 Sicherheits-Screen</h2>
+              <h2 className="text-xl font-bold tracking-tight">QM-Tool Nachhaltigkeit – Sicherheitsportal</h2>
               <p className="text-xs text-slate-300">
                 2-Stufen-Verfahren: Firebase E-Mail-Login & In-App Unternehmens-Verschlüsselung
               </p>
@@ -349,7 +355,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   : 'Zugriff gesperrt'}
               </span>
             </div>
-            <span className="text-slate-400 font-mono text-[11px]">ENV1.2 v2023</span>
+            <span className="text-slate-400 font-mono text-[11px]">QM-Tool v2.0</span>
           </div>
         </div>
 
@@ -556,7 +562,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         required
                         value={passphrase}
                         onChange={(e) => setPassphrase(e.target.value)}
-                        placeholder="Mindestens 8 Zeichen (z.B. DGNB-Pass-2023)"
+                        placeholder="Mindestens 8 Zeichen (z.B. QM-Pass-2024)"
                         className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
                       />
                       <button
@@ -568,7 +574,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Initial-Empfehlung für Testzwecke: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">DGNB-ENV12-2023</code>
+                      Initial-Empfehlung für Testzwecke: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code>
                     </p>
                   </div>
 
@@ -658,10 +664,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </button>
                     </div>
                     <div className="flex items-center justify-between mt-1.5 text-[11px] text-slate-500">
-                      <span>Standard-Schlüssel für vorkonfiguriertes Testkonto: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">DGNB-ENV12-2023</code></span>
+                      <span>Standard-Schlüssel für vorkonfiguriertes Testkonto: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code></span>
                       <button
                         type="button"
-                        onClick={() => setPassphrase('DGNB-ENV12-2023')}
+                        onClick={() => setPassphrase('QM-Tool-2024')}
                         className="text-emerald-600 hover:text-emerald-700 underline font-medium cursor-pointer"
                       >
                         Einfügen
@@ -742,7 +748,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>Vercel Whitelist-Status: <strong className="text-slate-700">Aktiv</strong></span>
           </div>
-          <span>DGNB ENV1.2 Neubau (2023)</span>
+          <span>QM-Tool Nachhaltigkeit · Multi-Standard</span>
         </div>
       </div>
     </div>

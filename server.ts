@@ -27,11 +27,13 @@ app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
 // Whitelist configuration from environment variable
 function getAllowedEmails(): string[] {
-  const envEmails = process.env.ALLOWED_EMAILS || 'BrianLackmann@gmail.com,admin@dgnb-qm.de,auditor@bau-qm.org';
-  return envEmails
+  const defaultList = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de', 'auditor@bau-qm.org'];
+  const envEmails = process.env.ALLOWED_EMAILS || '';
+  const parsed = envEmails
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
+  return Array.from(new Set([...defaultList, ...parsed]));
 }
 
 // In-memory persistent store for user passphrase verifiers (salt + verifier ciphertext)

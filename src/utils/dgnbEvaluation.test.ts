@@ -82,3 +82,18 @@ test('Bauteilekatalog KO: demotes QS 4 to QS 2 if Bauteilekatalog is missing', (
   assert.equal(withCatalog.overallLevel, 4);
   assert.equal(withCatalog.isBauteilekatalogKO, false);
 });
+
+test('crypto: verifyPassphrase verifies QM-Tool passphrases and rejects wrong passphrases', async () => {
+  const { createPassphraseVerifier, verifyPassphrase } = await import('./crypto');
+  const phrase = 'QM-Tool-Pass-2024';
+  const verifier = await createPassphraseVerifier(phrase);
+  
+  assert.ok(verifier.saltHex.length > 0);
+  assert.ok(verifier.verifierHex.length > 0);
+
+  const isMatch = await verifyPassphrase(phrase, verifier.saltHex, verifier.verifierHex);
+  assert.equal(isMatch, true);
+
+  const isWrong = await verifyPassphrase('WrongPassword123!', verifier.saltHex, verifier.verifierHex);
+  assert.equal(isWrong, false);
+});
