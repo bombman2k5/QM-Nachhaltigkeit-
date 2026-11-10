@@ -9,6 +9,7 @@
         "@tailwindcss/vite": "^4.0.0",
         "@vitejs/plugin-react": "^4.3.4",
         "dotenv": "^17.2.3",
+        "esbuild": "^0.28.2",
         "express": "^4.21.2",
         "firebase": "^11.4.0",
         "jose": "^6.0.8",
