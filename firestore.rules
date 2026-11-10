@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.email is string && data.email.size() <= 256
+        && (!('hasPassphrase' in data) || data.hasPassphrase is bool)
+        && (!('passphraseSalt' in data) || (data.passphraseSalt is string && data.passphraseSalt.size() <= 128))
+        && (!('passphraseVerifier' in data) || (data.passphraseVerifier is string && data.passphraseVerifier.size() <= 256));
+    }
+
+    function isValidProjectAudit(data) {
+      return data.keys().hasAll(['id', 'userId', 'userEmail', 'projectName', 'productName', 'qualityLevel'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.userEmail is string && data.userEmail.size() <= 256
+        && data.projectName is string && data.projectName.size() <= 256
+        && data.productName is string && data.productName.size() <= 256
+        && data.qualityLevel is int && data.qualityLevel >= 1 && data.qualityLevel <= 4
+        && (!('manufacturer' in data) || (data.manufacturer is string && data.manufacturer.size() <= 256))
+        && (!('auditDate' in data) || (data.auditDate is string && data.auditDate.size() <= 64))
+        && (!('encryptedPayload' in data) || (data.encryptedPayload is string && data.encryptedPayload.size() <= 100000));
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUserProfile(request.resource.data);
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUserProfile(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /audits/{auditId} {
+      allow get: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(auditId) && isValidProjectAudit(request.resource.data);
+      allow update: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid && isValidProjectAudit(request.resource.data);
+      allow delete: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "QM-Tool Nachhaltigkeit",
+  "description": "Qualitätsmanagement- und Konformitäts-Prüftool für nachhaltige Bauprodukte mit Multi-Standard-Unterstützung (DGNB, QNG, BNB sowie KI-Dokumentenscan weiterer Instituts-Leitfäden) und selektiver Auswertung.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

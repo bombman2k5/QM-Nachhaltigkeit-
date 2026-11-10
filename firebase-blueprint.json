@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "UserProfile",
+      "description": "Private user profile storing authentication and passphrase verification metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "hasPassphrase": { "type": "boolean" },
+        "passphraseSalt": { "type": "string", "maxLength": 128 },
+        "passphraseVerifier": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email"]
+    },
+    "projectAudit": {
+      "title": "ProjectAudit",
+      "description": "Audited DGNB ENV1.2 product compliance records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "projectName": { "type": "string", "maxLength": 256 },
+        "productName": { "type": "string", "maxLength": 256 },
+        "manufacturer": { "type": "string", "maxLength": 256 },
+        "qualityLevel": { "type": "integer" },
+        "auditDate": { "type": "string", "maxLength": 64 },
+        "encryptedPayload": { "type": "string", "maxLength": 100000 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "userEmail", "projectName", "productName", "qualityLevel"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "userProfile",
+      "description": "User profile with passphrase verifier and status"
+    },
+    "/audits/{auditId}": {
+      "schema": "projectAudit",
+      "description": "Compliance records stored per auditor"
+    }
+  }
+}
