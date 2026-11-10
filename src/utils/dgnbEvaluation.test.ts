@@ -97,3 +97,49 @@ test('crypto: verifyPassphrase verifies QM-Tool passphrases and rejects wrong pa
   const isWrong = await verifyPassphrase('WrongPassword123!', verifier.saltHex, verifier.verifierHex);
   assert.equal(isWrong, false);
 });
+
+test('safeFetchJson handles HTML error responses safely without throwing JSON.parse error', async () => {
+  const { safeFetchJson } = await import('./safeFetch');
+
+  // Mock global fetch returning HTML 404 response (Vercel standard behavior)
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response('<!DOCTYPE html><html><head><title>404: NOT_FOUND</title></head><body><h1>404</h1></body></html>', {
+      status: 404,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  };
+
+  try {
+    const result = await safeFetchJson('/api/auth/verify-session');
+    assert.equal(result.ok, false);
+    assert.equal(result.isHtmlError, true);
+    assert.equal(result.status, 404);
+    assert.ok(result.error?.includes('Server-Endpunkt liefert HTML'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('safeFetchJson successfully parses valid JSON responses', async () => {
+  const { safeFetchJson } = await import('./safeFetch');
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response(JSON.stringify({ success: true, isAuthorized: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const result = await safeFetchJson<{ success: boolean; isAuthorized: boolean }>('/api/auth/verify-session');
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 200);
+    assert.equal(result.data?.success, true);
+    assert.equal(result.data?.isAuthorized, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

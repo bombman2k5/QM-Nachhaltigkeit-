@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CriteriaRow, ProductEvaluationResult, SustainabilityStandard } from '../types/dgnb';
+import { safeFetchJson } from '../utils/safeFetch';
 import { SAMPLE_PRODUCTS } from '../data/sampleProducts';
 import {
   FileText,
@@ -88,7 +89,11 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       }));
 
     try {
-      const res = await fetch('/api/standards/analyze-product', {
+      const res = await safeFetchJson<{
+        success: boolean;
+        message?: string;
+        result: ProductEvaluationResult;
+      }>('/api/standards/analyze-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -105,12 +110,11 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Analysefehler');
+      if (!res.ok || !res.data || !res.data.success) {
+        throw new Error(res.error || res.data?.message || 'Analysefehler');
       }
 
-      onAnalysisComplete(data.result);
+      onAnalysisComplete(res.data.result);
     } catch (err: any) {
       setErrorMessage('Fehler bei der Analyse: ' + (err.message || String(err)));
     } finally {

@@ -25,6 +25,19 @@ const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
+// URL prefix normalizer to ensure requests work whether Vercel preserves or strips /api
+app.use((req, _res, next) => {
+  if (
+    !req.url.startsWith('/api') &&
+    (req.url.startsWith('/auth/') ||
+      req.url.startsWith('/standards/') ||
+      req.url.startsWith('/dgnb/'))
+  ) {
+    req.url = '/api' + req.url;
+  }
+  next();
+});
+
 // Whitelist configuration from environment variable
 function getAllowedEmails(): string[] {
   const defaultList = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de', 'auditor@bau-qm.org'];
@@ -824,4 +837,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only launch standalone HTTP listener if not running in a serverless environment (e.g. Vercel)
+if (process.env.VERCEL !== '1' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer();
+}
+
+export default app;
+export { app };

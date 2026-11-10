@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CriteriaRow, SustainabilityStandard } from '../types/dgnb';
+import { safeFetchJson } from '../utils/safeFetch';
 import { ReviewCriteriaModal } from './ReviewCriteriaModal';
 import {
   CheckCircle2,
@@ -72,7 +73,14 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
     reader.onload = async () => {
       try {
         const base64 = reader.result as string;
-        const res = await fetch('/api/standards/parse-guideline-pdf', {
+        const res = await safeFetchJson<{
+          success: boolean;
+          matrix?: CriteriaRow[];
+          standardName?: string;
+          institute?: string;
+          version?: string;
+          message?: string;
+        }>('/api/standards/parse-guideline-pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -81,19 +89,20 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           }),
         });
 
-        const data = await res.json();
-        if (data.success && Array.isArray(data.matrix) && data.matrix.length > 0) {
+        if (res.ok && res.data?.success && Array.isArray(res.data.matrix) && res.data.matrix.length > 0) {
           // Open interactive review modal so user can inspect and edit before importing
           setPendingScanResult({
             isOpen: true,
-            standardName: data.standardName || file.name.replace(/\.[^/.]+$/, ''),
-            institute: data.institute || 'Unabhängiges Institut / Prüfstelle',
-            version: data.version || new Date().getFullYear().toString(),
-            rows: data.matrix,
+            standardName: res.data.standardName || file.name.replace(/\.[^/.]+$/, ''),
+            institute: res.data.institute || 'Unabhängiges Institut / Prüfstelle',
+            version: res.data.version || new Date().getFullYear().toString(),
+            rows: res.data.matrix,
           });
-          setUploadMessage(`Erfolgreich gescannt: ${data.matrix.length} Kriterienzeilen gefunden. Bitte bestätigen Sie die Angaben.`);
+          setUploadMessage(`Erfolgreich gescannt: ${res.data.matrix.length} Kriterienzeilen gefunden. Bitte bestätigen Sie die Angaben.`);
         } else {
-          setUploadMessage('Es konnten keine Kriterien aus dem Dokument extrahiert werden.');
+          setUploadMessage(
+            res.error || res.data?.message || 'Es konnten keine Kriterien aus dem Dokument extrahiert werden.'
+          );
         }
       } catch (err: any) {
         setUploadMessage('Fehler beim Einlesen des Dokuments: ' + (err.message || String(err)));

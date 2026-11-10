@@ -16,5 +16,5 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "server.ts", "firebase-applet-config.json"]
+  "include": ["src", "server.ts", "api", "firebase-applet-config.json"]
 }

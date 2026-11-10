@@ -404,8 +404,18 @@ app.use(express.urlencoded({
 	extended: true,
 	limit: "60mb"
 }));
+app.use((req, _res, next) => {
+	if (!req.url.startsWith("/api") && (req.url.startsWith("/auth/") || req.url.startsWith("/standards/") || req.url.startsWith("/dgnb/"))) req.url = "/api" + req.url;
+	next();
+});
 function getAllowedEmails() {
-	return (process.env.ALLOWED_EMAILS || "BrianLackmann@gmail.com,admin@dgnb-qm.de,auditor@bau-qm.org").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+	const defaultList = [
+		"brianlackmann@gmail.com",
+		"admin@dgnb-qm.de",
+		"auditor@bau-qm.org"
+	];
+	const parsed = (process.env.ALLOWED_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+	return Array.from(/* @__PURE__ */ new Set([...defaultList, ...parsed]));
 }
 var userPassphraseRecords = /* @__PURE__ */ new Map();
 userPassphraseRecords.set("brianlackmann@gmail.com", {
@@ -1049,5 +1059,5 @@ async function startServer() {
 		console.log(`[QM-Tool Nachhaltigkeit Server] Running at http://localhost:${PORT} in ${isDev ? "development" : "production"} mode`);
 	});
 }
-startServer();
-export {};
+if (process.env.VERCEL !== "1" && !process.env.AWS_LAMBDA_FUNCTION_NAME) startServer();
+export { app, app as default };
