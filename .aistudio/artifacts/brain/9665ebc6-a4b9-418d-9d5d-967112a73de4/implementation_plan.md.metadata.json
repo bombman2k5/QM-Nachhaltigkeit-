@@ -1,6 +1,6 @@
 {
-  "summary":  "Detaillierter Implementierungsplan zur vollständigen Umbenennung und Vereinheitlichung der Applikation auf 'QM-Tool Nachhaltigkeit' anstelle von 'DGNB ENV1.2'. Berücksichtigt die bestätigten Entscheidungen zur Beibehaltung von DGNB ENV1.2 als spezifischem Fachkriterium im Multi-Standard-Katalog sowie die konsistente Aktualisierung des Sicherheits- und Authentifizierungsbereichs.",
-  "updatedAt":  "2026-11-10T12:29:51.255908009Z",
+  "summary":  "Architektur- und Umsetzungsplan für den KI-gestützten PDF-Upload von Sicherheitsdatenblättern (SDB) und Prüfberichten in Schritt 2 mit interaktivem Prüf- und Bestätigungs-Modal, Entfernung aller Login-/Passphrase-Barrieren und Bereinigung sämtlicher Demodaten für einen reibungslosen Direkteinstieg.",
+  "updatedAt":  "2026-11-10T13:39:04.186206842Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

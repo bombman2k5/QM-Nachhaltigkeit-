@@ -1,125 +1,158 @@
-# QM-Tool Nachhaltigkeit – Vereinheitlichung der Systembezeichnung
+# KI-gestützter PDF-Upload für Sicherheitsdatenblätter & Prüfberichte mit Bestätigungs-Workflow
 
-Umfassende Harmonisierung und Umstellung der Anwendungsbezeichnung auf **QM-Tool Nachhaltigkeit** über alle Benutzeroberflächen, Sicherheitsmasken und Kommunikationsbereiche hinweg, unter Beibehaltung von *DGNB ENV1.2* als spezifischem Fachkriterium im Multi-Standard-Prüfkatalog.
+Vollständige Integration einer KI-gestützten Dokumentenextraktion für Bauprodukt-Nachweise (Sicherheitsdatenblätter und Labor-Prüfberichte/Zertifikate) im Schritt 2, inklusive interaktivem Bestätigungsdialog für ausgelesene Kennwerte und barrierefreiem Direkteinstieg ohne Login- oder Demodaten-Zwänge.
+
+---
+
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Bestätigte Entscheidungen aus der Abstimmung:**
-> 1. **Trennung von App-Brand und Normenkatalog:** Die Applikation, das Sicherheitsportal, die Navigation, Seitentitel und Systemhinweise treten einheitlich als **QM-Tool Nachhaltigkeit** auf. Die fachliche Kriterienmatrix *DGNB ENV1.2 (Neubau 2023)* bleibt innerhalb der Multi-Standard-Auswahl (neben QNG und BNB) als präzise Normenbezeichnung erhalten, um fachliche Verwechslungen zu vermeiden.
-> 2. **Sicherheits- & Login-Screen:** Der Authentifizierungs-Screen ("DGNB ENV1.2 Sicherheits-Screen") wird auf **QM-Tool Nachhaltigkeit – Sicherheitsportal** umgestellt. Hinweistexte und die empfohlene Test-Passphrase werden auf das QM-Tool ausgerichtet (mit voller Abwärtskompatibilität für bestehende Test-Passphrasen).
+> Die folgenden Kernentscheidungen wurden in Phase 1 mit dem Anwender abgestimmt und bilden das Fundament der Implementierung:
+
+- **Bestätigungs-Workflow (KI-Datenübernahme)**: Die von der KI aus den PDFs ausgelesenen Kennwerte (Produktname, Hersteller, primäre DGNB-Bauteilzeile, VOC-Werte, REACH SVHC, Prüfzeichen/Zertifikate) werden in einem strukturierten **Dialogfenster (Modal)** mit Vorher-Nachher-Gegenüberstellung, Zuverlässigkeitshinweisen und Textzitaten aus dem Dokument präsentiert. Erst nach ausdrücklicher Bestätigung (und optionaler manueller Korrektur) durch den Benutzer werden die Werte in das Bewertungsformular übernommen.
+- **Upload-Struktur im Schritt 2**: Zwei klar separierte Drag-and-Drop-Zonen für **Sicherheitsdatenblätter (SDB)** und **Labor-Prüfberichte / Zertifikate** (jeweils PDF-Format, max. 30 MB pro Dokument, mit Dateinamenanzeige, Dateigröße und Löschen-/Ersetzen-Option).
+- **Startverhalten & Navigation**: Die Anwendung startet direkt in **Schritt 1 (Kriterienmatrix)** mit einer hervorgehobenen Schnellstart-Schaltfläche (*"Direkt zur Produktprüfung (Schritt 2)"*), sodass der Anwender entweder die Regelwerksmatrix sichten oder ohne Umwege sofort Dokumente prüfen kann.
+- **Vollständige Entfernung von Login & Demodaten**: 
+  - Die bisherige `AuthScreen`-Sperre, Whitelist-Abfragen und die Passphrase-Verschlüsselung werden entfernt; die App ist sofort einsatzbereit.
+  - Vorgefertigte Mustertexte (z. B. Caparol-Demodaten) und Dummy-Schnipsel werden restlos entfernt. Das Formular startet in einem sauberen, neutralen Zustand.
 
 ---
 
-## 1. Übersicht & Kernkonzept
+### 1. Overview & Core Concept
 
-- **Was das System leistet:**
-  Das **QM-Tool Nachhaltigkeit** dient Auditoren, Nachhaltigkeitsberatern und Planern als zentrales Qualitätsmanagement-System zur Prüfung von Bauprodukten, Sicherheitsdatenblättern (SDB) und Emissionsprüfberichten. Es bewertet Baustoffe nach dem strengen Schwachstellenprinzip (K.O.-Verfahren) selektiv gegen etablierte Nachhaltigkeitsstandards (DGNB ENV1.2, QNG Anhang 3, BNB 1.1.6) und benutzerdefinierte Institutsleitfäden.
-- **Zielgruppe & Anwender:**
-  DGNB-Consultants, BNB-Auditoren, Nachhaltigkeitskoordinatoren, Generalübernehmer und Produkthersteller, die eine verlässliche Konformitätsprüfung ohne Medienbrüche durchführen.
-- **Mehrwert dieser Umstellung:**
-  Beseitigung irreführender Altreferenzen ("DGNB ENV1.2 Sicherheits-Screen"), die den falschen Eindruck erweckten, das Werkzeug sei rein auf DGNB beschränkt. Die neue Bezeichnung spiegelt die echte Multi-Standard-Funktionalität wider, während DGNB ENV1.2 präzise als eines der wählbaren Zertifizierungssysteme verankert bleibt.
+- **Was das Feature leistet**: Anwender können originale PDF-Dateien von Sicherheitsdatenblättern und Prüfberichten per Drag-and-Drop hochladen. Das Backend analysiert die Dokumente server-seitig über das Gemini-Modell (`gemini-3.8-flash`) mit strukturierter JSON-Extraktion. Die extrahierten baustoffökologischen Parameter werden in einem übersichtlichen Bestätigungsdialog angezeigt, vom Prüfer freigegeben und automatisiert in das Prüfformular übernommen.
+- **Zielgruppe**: Nachhaltigkeits-Auditoren, DGNB-/BNB-/QNG-Consultants, Bauleiter und Qualitätsmanager, die Baustoffe zügig und fehlerfrei auf Konformität mit Schadstoffkriterien prüfen müssen.
+- **Kernwert**: Drastische Zeitersparnis bei der manuellen Durchsicht mehrseitiger Sicherheitsdatenblätter (Kapitel 3, 9, 15) und Prüfberichte, kombiniert mit maximaler Verlässlichkeit durch das Schwachstellen-/K.O.-Prinzip und den menschlichen Freigabeschritt ("Human in the loop").
 
 ---
 
-## 2. Benutzererlebnis & Interface-Design
+### 2. User Experience & Visual Design
 
-### Key User Flows
+#### Key User Flows
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ Stufe 1: QM-Tool Nachhaltigkeit – Sicherheitsportal                              │
-│  - Einheitliches Branding: "QM-Tool Nachhaltigkeit – Sicherheitsportal"          │
-│  - Autorisierung gegen die zentrale Whitelist (ALLOWED_EMAILS)                   │
-│  - Statusanzeige: "QM-Tool Nachhaltigkeit Arbeitsbereich wird vorbereitet"       │
-└────────────────────────────────────────┬─────────────────────────────────────────┘
-                                         ▼
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ Stufe 2: In-App Entschlüsselungsmaske (Vault Unlock)                            │
-│  - Titel: "Sicherheitsprüfung der Unternehmensdaten – QM-Tool Nachhaltigkeit"    │
-│  - Hinweistext & Testschlüssel-Vorschlag aktualisiert auf: QM-Tool-2024          │
-│  - Nach erfolgreicher Entschlüsselung Weiterleitung in den Arbeitsbereich       │
-└────────────────────────────────────────┬─────────────────────────────────────────┘
-                                         ▼
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ 4-Schritte Prüf-Workspace (QM-Tool Nachhaltigkeit)                               │
-│  ├── Schritt 1: Bewertungsmatrizen Nachhaltigkeit                                │
-│  │    └─> Tabs: [DGNB ENV1.2] | [QNG Siegel] | [BNB Bundesbau] | [+ Leitfaden]    │
-│  ├── Schritt 2: Produktprüfung                                                   │
-│  │    └─> Selektive Standard-Auswahl: [✓] DGNB ENV1.2  [✓] QNG  [✓] BNB          │
-│  ├── Schritt 3: Multi-Auswertung                                                 │
-│  │    └─> Synopse & Kachelansicht für die gewählten Nachhaltigkeitsstandards     │
-│  └── Schritt 4: Kundennachweis                                                   │
-│       └─> Druckfertiger Konformitätsbericht mit Branding "QM-Tool Nachhaltigkeit"│
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+1. **Start & Direkteinstieg**:
+   - Die App öffnet ohne jegliche Anmeldeschranke direkt in Schritt 1 (Kriterienmatrix).
+   - In der Kopfzeile und im oberen Bereich von Schritt 1 ermöglicht der Aktions-Button *"Direkt zur Produktprüfung (Schritt 2)"* einen sofortigen Wechsel.
+2. **Dokumenten-Upload im Schritt 2**:
+   - Zwei visuell abgesetzte Upload-Zonen:
+     - **Zone A**: *"1. Sicherheitsdatenblatt (SDB)"* (Symbol: Datei mit Gefahrstoff-/Schutzschild-Akzent, Hinweistext: "PDF mit Abschnitten 3, 9 & 15").
+     - **Zone B**: *"2. Labor-Prüfbericht / Zertifikat"* (Symbol: Zertifikats-/Prüfkammer-Akzent, Hinweistext: "PDF mit Blauer Engel, EMICODE EC1 PLUS, AgBB, FSC/PEFC").
+   - Nach Auswahl einer PDF-Datei erscheint sofort eine visuelle Statusanzeige (Dateiname, Größe, Ladebalken/Status *"Wird durch KI analysiert..."*).
+3. **Interaktives KI-Bestätigungs-Modal**:
+   - Sobald die Analyse abgeschlossen ist, öffnet sich automatisch das Bestätigungsfenster:
+     - **Header**: Zusammenfassung des erkannten Dokuments mit Status *"Erfolgreich ausgelesen"*.
+     - **Tabelle / Grid**:
+       - *Parameter*: z. B. Produktname, Hersteller, DGNB-Bauteilzeile, VOC-Gehalt, SVHC-Status, Zertifikate.
+       - *Extrahierter Wert*: Direkt im Eingabefeld editierbar, falls der Auditor einen Wert anpassen möchte.
+       - *Fundstelle / Zitat*: Direkter Textausschnitt aus dem Dokument als Beleg.
+     - **Aktionen**:
+       - Primary: *"Werte bestätigen & ins Formular übernehmen"* (grün hervorgehoben).
+       - Secondary: *"Verwerfen / Manuell eingeben"*.
+4. **Formularstatus nach Bestätigung**:
+   - Die Felder im Schritt 2 werden befüllt und dezent als *"KI-verifiziert & vom Nutzer freigegeben"* gekennzeichnet.
+   - Textauszüge bleiben für manuelle Feinjustierungen sichtbar und editierbar.
+   - Mit einem Klick auf *"Ausgewählte Standards jetzt prüfen"* startet wie gewohnt die Multi-Standard-Konformitätsprüfung (DGNB, QNG, BNB).
 
-### Visual Identity & Theme
-- **Typografie & Display:** Plus Jakarta Sans für Headings und Systemmarke, JetBrains Mono für Prüfbericht-IDs, Grenzwerte und Passphrase-Codes.
-- **Top Bar Contract:** Aufgeräumter 3-Zonen-Header ohne überladene Subtitle-Badges:
-  - *Zone 1:* Marken-Wortmarke `QM-Tool Nachhaltigkeit` mit dezentem Schutzschild-Icon.
-  - *Zone 2:* 4 Navigationslinks mit Einzeilen-Disziplin (`Bewertungsmatrizen`, `Produktprüfung`, `Multi-Auswertung`, `Kundennachweis`).
-  - *Zone 3:* Projekt-Eingabefeld, Auditor-Konto und Abmelde-Aktion.
-- **Farbpalette:** 60% neutraler Slate-Hintergrund, 30% strukturierte weiße Kartenflächen mit subtilen 1px-Bordern, 10% Akzentgrün (`emerald-600`/`emerald-700`) für Qualitätsstufen und Bestätigungen.
+#### Visual Identity & Theme
+
+- **Designsprache**: Professionelles, behördliches Qualitätsmanagement-Werkzeug im klaren Industrie-Standard (DGNB/DIN-konforme Ästhetik, Slate-Hintergründe, Emerald-Akzente für Konformität und Vertrauen).
+- **Farbpalette**:
+  - Neutraler Hintergrund: `bg-slate-50` / `bg-slate-100` mit `border-slate-200`
+  - Primärfarben: `emerald-600` (Aktionen & bestandene Qualitätsstufen), `slate-900` (Typografie)
+  - Hervorhebungen / Status: `emerald-50` mit `border-emerald-300` für freigegebene KI-Daten, `amber-50` für Prüfhinweise
+- **Typografie**: Moderner Sans-Serif Stack (Inter / System-UI), mit monospace-Schriftarten für Grenzwerte, CAS-Nummern und DIN-Normen.
+- **Anti-Slop Restriktion**: Keine überflüssigen Glaseffekte oder verspielte Pillen-Chips; stattdessen saubere Datentabellen mit klarer visueller Hierarchie und Barrierefreiheit nach WCAG AA.
 
 ---
 
-## 3. Zentrale Produkt-Entscheidungen & Abwägungen
+### 3. Key Product Decisions & Trade-Offs
 
-- **Entscheidung 1: Präzise Marken- und Katalogtrennung**
-  - *Gewählter Ansatz:* Die Gesamt-Applikation heißt konsequent `QM-Tool Nachhaltigkeit`. Innerhalb der Matrizenverwaltung und des Produktprüfformulars heißt das DGNB-Kriterium weiterhin `DGNB ENV1.2 (Neubau 2023)`.
-  - *Begründung:* Nutzer müssen im Multi-Standard-Betrieb eindeutig erkennen, welches Zertifizierungssystem (DGNB vs. QNG vs. BNB) sie gerade konfigurieren oder prüfen.
-  - *Verworfene Alternative:* Ein pauschales Ersetzen von jedem "DGNB" im Code hätte die Kriterienauswahl unbenutzbar gemacht.
+- **Entscheidung 1: Server-seitige PDF-Analyse via `@google/genai` (gemini-3.8-flash)**
+  - *Gewählter Ansatz*: Upload der PDFs als Base64-Payload an den sicheren Express-Server (`/api/documents/parse-pdf`). Der Server übergibt das PDF multimodal als `application/pdf` Inline-Data an das Modell `gemini-3.8-flash` mit striktem `responseSchema`.
+  - *Begründung*: Das Gemini-Modell verarbeitet mehrseitige PDFs nativ inklusive Tabellenlayouts in Sicherheitsdatenblättern ohne fehleranfälliges externes OCR oder unvollständiges Regex-Parsen. Der API-Schlüssel verbleibt geschützt auf dem Server.
+  - *Verworfene Alternativen*: Reines client-seitiges `pdfjs-dist` Parsing wurde verworfen, da formatierte Tabellen in Sicherheitsdatenblättern (GHS-Kennzeichnung, Grenzwerte in g/l) dabei oft unleserlich zerstückelt werden.
 
-- **Entscheidung 2: Aktualisierung der Sicherheitsmaske & Passphrase-Hinweise**
-  - *Gewählter Ansatz:* Die Authentifizierungsmaske (`AuthScreen.tsx`) wird von "DGNB ENV1.2 Sicherheits-Screen" auf "QM-Tool Nachhaltigkeit Sicherheits-Portal" umbenannt. Die Vorbelegungen und Hilfetexte für Testzwecke werden auf `QM-Tool-2024` modernisiert, wobei zur Vermeidung von Lockouts für bereits angelegte Accounts auch der alte Schlüssel `DGNB-ENV12-2023` im Entschlüsselungs-Fallback weiterhin akzeptiert wird.
-  - *Begründung:* Maximale Konsistenz ohne bestehende Nutzertests oder bestehende Tresor-Verschlüsselungen zu zerstören.
+- **Entscheidung 2: Zweistufiges Bestätigungsprinzip ("Human-in-the-Loop")**
+  - *Gewählter Ansatz*: Automatisches Öffnen des Bestätigungs-Modals nach dem Scan mit editierbaren Feldern und Belegzitaten. Erst nach Bestätigung werden die Daten ins Arbeitsformular übernommen.
+  - *Begründung*: Erfüllt exakt die DGNB- und Auditor-Anforderungen an Revisionssicherheit. Ein Auditor darf keine ungeprüften KI-Vermutungen in ein offizielles Konformitätsgutachten übernehmen.
+
+- **Entscheidung 3: Kompletter Rückbau der Login- & Passphrase-Schicht**
+  - *Gewählter Ansatz*: Entfernung von `AuthScreen`, der Session-Token-Prüfung und der WebCrypto-Passphrase-Abfrage. Die Navigation wird bereinigt (kein Abmelde-Button oder gesperrter Status mehr).
+  - *Begründung*: Erfüllt den Anwenderwunsch nach einem unkomplizierten, sofort nutzbaren Werkzeug ohne Demodaten und Zugangsbarrieren.
 
 ---
 
-## 4. Technische Architektur & System-Mapping
-
-### System-Architektur
+### 4. Technical Architecture & Data Strategy
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Browser-Client: QM-Tool Nachhaltigkeit                                   │
-│  ├── HTML Entry Point (index.html, metadata.json)                        │
-│  │    └─> Title: "QM-Tool Nachhaltigkeit"                                │
-│  ├── Navbar.tsx                                                          │
-│  │    └─> Wordmark: "QM-Tool Nachhaltigkeit"                             │
-│  ├── AuthScreen.tsx                                                      │
-│  │    ├── Header: "QM-Tool Nachhaltigkeit – Sicherheitsportal"           │
-│  │    ├── Subtext: 2-Stufen-Verfahren für nachhaltiges Qualitätsmanagement│
-│  │    ├── Badge: "QM-Tool v2.0"                                          │
-│  │    └── Feedback: "Verschlüsselung verifiziert. QM-Tool Arbeitsbereich"│
-│  ├── Step1Matrix.tsx / Stepper.tsx                                       │
-│  │    └─> Einheitliche QM-Tool Überschriften                             │
-│  └── Step4CustomerDocument.tsx                                           │
-│       └─> Briefkopf: "QM-Tool Nachhaltigkeit · Konformitätsgutachten"    │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     │
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Backend & Server-Routen (server.ts & crypto.ts)                          │
-│  ├── /api/auth/verify-session                                            │
-│  │    └─> Whitelist-Prüfung & Tresor-Status                              │
-│  └── /api/standards/analyze-product                                      │
-│       └─> Multi-Standard-Auswertung (DGNB ENV1.2, QNG, BNB)              │
-└──────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                          React Frontend (SPA)                          │
+├────────────────────────────────────────────────────────────────────────┤
+│  Navbar (Bereinigt von Auth/Logout, Projektname, Quick-Navigation)     │
+├────────────────────────────────────────────────────────────────────────┤
+│  Stepper: [1. Kriterien]  ──►  [2. Produkt & Upload]  ──► [3. Audit]   │
+├────────────────────────────────────────────────────────────────────────┤
+│  Schritt 2: Step2ProductUpload                                         │
+│  ┌───────────────────────────┐      ┌───────────────────────────┐      │
+│  │ Upload-Zone: SDB (PDF)    │      │ Upload-Zone: Prüfbericht  │      │
+│  └─────────────┬─────────────┘      └─────────────┬─────────────┘      │
+│                │                                  │                    │
+│                ▼                                  ▼                    │
+│  ┌──────────────────────────────────────────────────────────────┐      │
+│  │ AI Extraction Modal: "Ausgelesene Daten prüfen & bestätigen"  │      │
+│  │ - Produkt, Hersteller, DGNB-Zeile, VOC, SVHC, Zertifikate    │      │
+│  │ - Zitate aus dem PDF als Nachweis, editierbare Inputs        │      │
+│  │ [ Abbrechen ]            [ Daten bestätigen & übernehmen ]  │      │
+│  └──────────────────────────────┬───────────────────────────────┘      │
+│                                 ▼                                      │
+│  ┌──────────────────────────────────────────────────────────────┐      │
+│  │ Bewertungsformular (Befüllt mit bestätigten Werten)          │      │
+│  │ [ Ausgewählte Standards jetzt prüfen (DGNB, QNG, BNB) ]       │      │
+│  └──────────────────────────────────────────────────────────────┘      │
+└─────────────────────────────────┬──────────────────────────────────────┘
+                                  │ HTTP POST /api/documents/parse-pdf
+                                  ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Express Backend (Node.js)                       │
+├────────────────────────────────────────────────────────────────────────┤
+│  Route: POST /api/documents/parse-pdf                                  │
+│  - Nimmt PDF base64 + Dokumententyp entgegen (sdb oder pruefbericht)   │
+│  - Ruft @google/genai SDK (gemini-3.8-flash) mit Schema auf            │
+│  - Gibt strukturierte Kennwerte + Zitate zurück                        │
+├────────────────────────────────────────────────────────────────────────┤
+│  Route: POST /api/standards/analyze-product                            │
+│  - Führt deterministische K.O.-Prüfung gegen DGNB/QNG/BNB durch        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Konkrete Komponenten-Anpassungen nach Nutzer-Freigabe
+#### Extraktions-Schema für PDF-Dokumente
 
-1. **`src/components/AuthScreen.tsx`**:
-   - Header von `"DGNB ENV1.2 Sicherheits-Screen"` auf `"QM-Tool Nachhaltigkeit – Sicherheitsportal"` anpassen.
-   - Subtext von `"DGNB ENV1.2 Arbeitsbereich wird geladen..."` auf `"QM-Tool Nachhaltigkeit Arbeitsbereich wird geladen..."` umstellen.
-   - Versions-Badge von `"ENV1.2 v2023"` auf `"QM-Tool v2.0"` harmonisieren.
-   - Fußzeilen-Badge von `"DGNB ENV1.2 Neubau (2023)"` auf `"QM-Tool Nachhaltigkeit · Multi-Standard"` anpassen.
-   - Hilfetexte & Vorbelegungen zur Test-Passphrase auf `QM-Tool-Pass-2024` bzw. `QM-Tool-2024` ergänzen, bei vollständiger Abwärtskompatibilität für `DGNB-ENV12-2023`.
-2. **`src/components/Navbar.tsx`**:
-   - Sicherstellen, dass Brand-Wortmarke und Titel konsistent `QM-Tool Nachhaltigkeit` lauten.
-3. **`src/components/Step4CustomerDocument.tsx`**:
-   - Sicherstellen, dass im druckfertigen Kundennachweis der offizielle Header `QM-Tool Nachhaltigkeit · Baustoff-Konformitätsgutachten` prominent und sauber formatiert ist.
-4. **Verifikation & Tests**:
-   - Ausführung der Unit-Tests (`npx --yes tsx --test src/utils/dgnbEvaluation.test.ts`).
-   - Applet-Kompilierung (`compile_applet`) und Linting (`lint_applet`).
-   - Browser-Verifikation (`computer-use`) des Sicherheits-Screens und des Hauptarbeitsbereichs zur Bestätigung der visuellen Typografie und Fehlerfreiheit.
+```typescript
+interface ExtractedDocumentData {
+  documentType: 'sdb' | 'pruefbericht' | 'unbekannt';
+  productName?: string;
+  manufacturer?: string;
+  suggestedCriteriaNr?: string; // z.B. "1" für Innenwandfarben
+  vocContent?: string;          // z.B. "< 1 g/l" oder "28 g/l"
+  svhcStatus?: string;          // z.B. "Keine SVHC > 0,1%"
+  certificates?: string[];      // z.B. ["Blauer Engel (DE-UZ 102)", "EMICODE EC1 PLUS"]
+  hasBauteilekatalog?: boolean; // Erwähnung Bauteilkatalog / Baustellendokumentation
+  summarySnippet: string;       // Relevante Fundstellen im Text
+  fieldQuotes: {
+    field: string;
+    quote: string;
+    pageOrSection?: string;
+  }[];
+}
+```
+
+---
+
+### Verifikations- und Akzeptanzkriterien
+
+1. **Upload-Funktion**: Benutzer kann sowohl für SDB als auch für Prüfberichte separate PDF-Dateien hochladen (per Drag-and-Drop oder Dateidialog).
+2. **KI-Analyse**: Das Backend liest per Gemini die bauphysikalisch relevanten Daten zuverlässig aus und liefert sie als strukturiertes JSON zurück.
+3. **Bestätigungsdialog**: Ein Modal zeigt die extrahierten Werte mit Fundstellen an. Erst nach Klick auf *"Bestätigen & übernehmen"* fließen die Werte in das Formular.
+4. **Keine Logins**: Die App öffnet ohne Login-Maske, Whitelist-Fehler oder Passphrase-Abfragen sofort betriebsbereit.
+5. **Keine Demodaten**: Felder und Formulare starten leer bzw. mit Platzhaltern ("Bitte PDF hochladen oder manuell eingeben"), ohne vorbefüllte Dummy-Produkte.
+6. **Kompilierung & Linting**: `npm run build` und `npm run lint` schließen fehlerfrei ab.

@@ -107,6 +107,30 @@ export interface ProductEvaluationResult {
   };
 }
 
+export interface ExtractedFieldQuote {
+  field: string;
+  label: string;
+  value: string;
+  quote: string;
+  pageOrSection?: string;
+  confidence?: 'high' | 'medium' | 'low';
+}
+
+export interface ExtractedDocumentData {
+  documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+  filename?: string;
+  productName?: string;
+  manufacturer?: string;
+  suggestedCriteriaNr?: string;
+  vocContent?: string;
+  svhcStatus?: string;
+  certificates?: string[];
+  hasBauteilekatalog?: boolean;
+  summarySnippet?: string;
+  fieldQuotes: ExtractedFieldQuote[];
+  rawAnalysisText?: string;
+}
+
 export interface SampleProduct {
   id: string;
   name: string;
@@ -118,3 +142,4 @@ export interface SampleProduct {
   testReportSnippet: string;
   hasBauteilekatalog: boolean;
 }
+

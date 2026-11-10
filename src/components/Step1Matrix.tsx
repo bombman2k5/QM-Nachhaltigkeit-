@@ -159,15 +159,24 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center space-x-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
           {!isConfirmed ? (
-            <button
-              onClick={onConfirmMatrix}
-              className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Kriterienmatrizen verbindlich fixieren</span>
-            </button>
+            <>
+              <button
+                onClick={onConfirmMatrix}
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all cursor-pointer border border-slate-300"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Matrizen fixieren</span>
+              </button>
+              <button
+                onClick={onProceedToStep2}
+                className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
+              >
+                <span>Direkt zur Produktprüfung (Schritt 2)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </>
           ) : (
             <div className="flex items-center space-x-2">
               <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
@@ -183,9 +192,9 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
               </button>
               <button
                 onClick={onProceedToStep2}
-                className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs cursor-pointer"
               >
-                <span>Weiter zu Schritt 2</span>
+                <span>Weiter zur Produktprüfung</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>

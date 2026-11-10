@@ -4,7 +4,6 @@ import { TableProperties, Upload, Award, FileText, Check } from 'lucide-react';
 interface StepperProps {
   currentStep: number;
   onStepClick: (step: number) => void;
-  isLoggedIn: boolean;
   isMatrixConfirmed: boolean;
   hasEvaluationResult: boolean;
 }
@@ -12,12 +11,9 @@ interface StepperProps {
 export const Stepper: React.FC<StepperProps> = ({
   currentStep,
   onStepClick,
-  isLoggedIn,
   isMatrixConfirmed,
   hasEvaluationResult,
 }) => {
-  if (!isLoggedIn) return null;
-
   const steps = [
     {
       id: 1,
@@ -30,15 +26,15 @@ export const Stepper: React.FC<StepperProps> = ({
     {
       id: 2,
       title: 'Schritt 2: Produktprüfung',
-      desc: 'Selektive Standards & Nachweise',
+      desc: 'SDB- & Prüfbericht-Upload',
       icon: Upload,
-      enabled: isMatrixConfirmed,
+      enabled: true, // Always accessible directly from step 1
       completed: hasEvaluationResult,
     },
     {
       id: 3,
       title: 'Schritt 3: Multi-Auswertung',
-      desc: 'Synopse & System-Kacheln',
+      desc: 'K.O.-Synopse & System-Kacheln',
       icon: Award,
       enabled: hasEvaluationResult,
       completed: currentStep === 4,
