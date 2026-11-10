@@ -38,15 +38,95 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Whitelist configuration from environment variable
+// Helper to extract email addresses and domain wildcards from arbitrary strings, JSON or env formats
+function extractEmailsFromString(raw: string): string[] {
+  if (!raw || typeof raw !== 'string') return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  const found: string[] = [];
+
+  // 1. Try JSON parsing (in case the config variable is a JSON object or array)
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      const parsedJson = JSON.parse(trimmed);
+      const walk = (val: any) => {
+        if (!val) return;
+        if (typeof val === 'string') {
+          found.push(...extractEmailsFromString(val));
+        } else if (Array.isArray(val)) {
+          val.forEach(walk);
+        } else if (typeof val === 'object') {
+          Object.values(val).forEach(walk);
+        }
+      };
+      walk(parsedJson);
+    } catch {
+      // Continue to regex scanning if not JSON
+    }
+  }
+
+  // 2. Scan for email addresses
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const matches = trimmed.match(emailRegex);
+  if (matches) {
+    matches.forEach((m) => found.push(m.toLowerCase().trim()));
+  }
+
+  // 3. Scan for domain wildcards like @kaubit.de
+  const domainMatches = trimmed.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g);
+  if (domainMatches) {
+    domainMatches.forEach((d) => found.push(d.toLowerCase().trim()));
+  }
+
+  // 4. Split by commas, semicolons, whitespace or newlines
+  const parts = trimmed.split(/[\s,;\n\r]+/);
+  for (const part of parts) {
+    const clean = part.replace(/^['"]|['"]$/g, '').trim();
+    if (clean.includes('@') && clean.length >= 5) {
+      found.push(clean.toLowerCase());
+    }
+  }
+
+  return found;
+}
+
+// Whitelist configuration supporting config, CONFIG, ALLOWED_EMAILS, etc.
 function getAllowedEmails(): string[] {
-  const defaultList = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de', 'auditor@bau-qm.org'];
-  const envEmails = process.env.ALLOWED_EMAILS || '';
-  const parsed = envEmails
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return Array.from(new Set([...defaultList, ...parsed]));
+  const defaultList = [
+    'brian.lackmann@kaubit.de',
+    'brianlackmann@gmail.com',
+    'admin@dgnb-qm.de',
+    'auditor@bau-qm.org',
+    'auditor@kaubit.de',
+    '@kaubit.de',
+  ];
+
+  const candidateEnvVars = [
+    process.env.CONFIG,
+    process.env.config,
+    process.env.Config,
+    process.env.ALLOWED_EMAILS,
+    process.env.allowed_emails,
+    process.env.ALLOWED_EMAIL,
+    process.env.allowed_email,
+    process.env.APP_CONFIG,
+    process.env.app_config,
+    process.env.WHITELIST,
+    process.env.whitelist,
+    process.env.WHITELIST_EMAILS,
+    process.env.VITE_ALLOWED_EMAILS,
+    process.env.VITE_CONFIG,
+  ];
+
+  const extractedFromEnv: string[] = [];
+  for (const envVal of candidateEnvVars) {
+    if (envVal) {
+      extractedFromEnv.push(...extractEmailsFromString(envVal));
+    }
+  }
+
+  return Array.from(new Set([...defaultList, ...extractedFromEnv]));
 }
 
 // In-memory persistent store for user passphrase verifiers (salt + verifier ciphertext)
@@ -59,12 +139,22 @@ interface UserPassphraseRecord {
 }
 const userPassphraseRecords = new Map<string, UserPassphraseRecord>();
 
-userPassphraseRecords.set('brianlackmann@gmail.com', {
-  uid: 'seed-brian',
-  email: 'BrianLackmann@gmail.com',
+const defaultSeedVerifier = {
   saltHex: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   verifierHex: '102030405060708090a0b0c0d0e0f000112233445566778899aabbccddeeff001122334455667788',
   createdAt: new Date().toISOString(),
+};
+
+userPassphraseRecords.set('brian.lackmann@kaubit.de', {
+  uid: 'seed-brian-kaubit',
+  email: 'brian.lackmann@kaubit.de',
+  ...defaultSeedVerifier,
+});
+
+userPassphraseRecords.set('brianlackmann@gmail.com', {
+  uid: 'seed-brian',
+  email: 'BrianLackmann@gmail.com',
+  ...defaultSeedVerifier,
 });
 
 // Lazy Gemini API client
@@ -127,10 +217,30 @@ async function verifyFirebaseToken(idToken: string): Promise<{ uid: string; emai
 
 app.get('/api/auth/status', (_req: Request, res: Response) => {
   const allowed = getAllowedEmails();
+  const activeVarName = process.env.CONFIG
+    ? 'CONFIG'
+    : process.env.config
+    ? 'config'
+    : process.env.ALLOWED_EMAILS
+    ? 'ALLOWED_EMAILS'
+    : process.env.APP_CONFIG
+    ? 'APP_CONFIG'
+    : 'default-config';
+
   res.json({
     firebaseAuthEnabled: true,
     projectId: FIREBASE_PROJECT_ID,
-    allowedEmailsHint: allowed.slice(0, 3).join(', '),
+    allowedEmails: allowed,
+    allowedEmailsHint: allowed.slice(0, 5).join(', '),
+    configDetected: Boolean(
+      process.env.CONFIG ||
+      process.env.config ||
+      process.env.Config ||
+      process.env.ALLOWED_EMAILS ||
+      process.env.allowed_emails ||
+      process.env.APP_CONFIG
+    ),
+    activeVarName,
   });
 });
 
@@ -172,7 +282,7 @@ app.post('/api/auth/verify-session', async (req: Request, res: Response) => {
         success: false,
         isAuthorized: false,
         email: userEmail,
-        message: `Zugriff verweigert: Die E-Mail-Adresse "${userEmail}" ist nicht auf der autorisierten Whitelist (ALLOWED_EMAILS) hinterlegt. Bitte kontaktieren Sie Ihren Administrator oder nutzen Sie BrianLackmann@gmail.com.`,
+        message: `Zugriff verweigert: Die E-Mail-Adresse "${userEmail}" ist nicht auf der autorisierten Whitelist (config / ALLOWED_EMAILS) hinterlegt. Bitte kontaktieren Sie Ihren Administrator oder nutzen Sie brian.lackmann@kaubit.de.`,
       });
     }
 

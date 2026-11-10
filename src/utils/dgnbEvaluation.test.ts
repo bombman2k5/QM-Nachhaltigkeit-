@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import { evaluateDgnbCompliance, isEmailAllowed } from './dgnbEvaluation';
 import { ParameterEvaluation } from '../types/dgnb';
 
-test('isEmailAllowed correctly matches whitelisted emails case-insensitively', () => {
-  const whitelist = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de'];
-  assert.equal(isEmailAllowed('BrianLackmann@gmail.com', whitelist), true);
-  assert.equal(isEmailAllowed('brianlackmann@gmail.com ', whitelist), true);
-  assert.equal(isEmailAllowed('ADMIN@DGNB-QM.DE', whitelist), true);
+test('isEmailAllowed correctly matches whitelisted emails case-insensitively and recognizes brian.lackmann@kaubit.de', () => {
+  const whitelist = ['auditor@partner.org'];
+  // Core user Brian Lackmann at Kaubit
+  assert.equal(isEmailAllowed('brian.lackmann@kaubit.de'), true);
+  assert.equal(isEmailAllowed('Brian.Lackmann@Kaubit.de '), true);
+  assert.equal(isEmailAllowed('brianlackmann@gmail.com'), true);
+  assert.equal(isEmailAllowed('auditor@kaubit.de'), true);
+  assert.equal(isEmailAllowed('colleague@kaubit.de'), true); // Company domain
+  assert.equal(isEmailAllowed('auditor@partner.org', whitelist), true);
   assert.equal(isEmailAllowed('intruder@hacker.com', whitelist), false);
   assert.equal(isEmailAllowed('', whitelist), false);
 });

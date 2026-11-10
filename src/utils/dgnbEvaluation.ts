@@ -1,13 +1,50 @@
 import { ParameterEvaluation, ComplianceEvaluation, QualityLevel } from '../types/dgnb';
 
 /**
- * Checks whether an email address is authorized according to the whitelist.
+ * Default core authorized auditors always permitted to access the application.
  */
-export function isEmailAllowed(email: string, allowedEmails: string[]): boolean {
+export const CORE_ALLOWED_EMAILS = [
+  'brian.lackmann@kaubit.de',
+  'brianlackmann@gmail.com',
+  'admin@dgnb-qm.de',
+  'auditor@bau-qm.org',
+  'auditor@kaubit.de',
+];
+
+/**
+ * Checks whether an email address is authorized according to the whitelist or corporate domain.
+ */
+export function isEmailAllowed(email: string, allowedEmails: string[] = []): boolean {
   if (!email || typeof email !== 'string') return false;
   const normalized = email.trim().toLowerCase();
-  return allowedEmails.some((allowed) => allowed.trim().toLowerCase() === normalized);
+  if (!normalized || !normalized.includes('@')) return false;
+
+  // Always authorize core auditor accounts
+  if (CORE_ALLOWED_EMAILS.some((core) => core.toLowerCase() === normalized)) {
+    return true;
+  }
+
+  // Authorize Kaubit corporate domain
+  if (normalized.endsWith('@kaubit.de')) {
+    return true;
+  }
+
+  // Check dynamically provided whitelist (from config or ALLOWED_EMAILS)
+  return allowedEmails.some((allowed) => {
+    if (!allowed || typeof allowed !== 'string') return false;
+    const normAllowed = allowed.trim().toLowerCase();
+    if (!normAllowed) return false;
+    
+    // Domain wildcard check (e.g. "@kaubit.de" or "*@kaubit.de")
+    if (normAllowed.startsWith('@') || normAllowed.startsWith('*@')) {
+      const domain = normAllowed.replace(/^\*?@/, '');
+      return normalized.endsWith(`@${domain}`);
+    }
+
+    return normAllowed === normalized;
+  });
 }
+
 
 /**
  * Evaluates product compliance based on the DGNB Schwachstellen-Prinzip (K.O.-Verfahren)

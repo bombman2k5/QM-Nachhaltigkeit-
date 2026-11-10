@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  signInWithPopup,
+  GoogleAuthProvider,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { safeFetchJson } from '../utils/safeFetch';
-import { isEmailAllowed } from '../utils/dgnbEvaluation';
+import { isEmailAllowed, CORE_ALLOWED_EMAILS } from '../utils/dgnbEvaluation';
 import {
   Shield,
   KeyRound,
@@ -42,11 +44,15 @@ type ScreenStage = 'email_login' | 'passphrase_mask' | 'access_denied';
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   onLoginSuccess,
-  defaultEmail = 'BrianLackmann@gmail.com',
+  defaultEmail = 'brian.lackmann@kaubit.de',
 }) => {
   // Screen Stage Management
   const [stage, setStage] = useState<ScreenStage>('email_login');
   const [authMode, setAuthMode] = useState<AuthMode>('login');
+
+  // Whitelist & Config state dynamically fetched from server
+  const [serverAllowedEmails, setServerAllowedEmails] = useState<string[]>(CORE_ALLOWED_EMAILS);
+  const [activeConfigVar, setActiveConfigVar] = useState<string>('config');
 
   // Stage 1: Firebase Auth credentials
   const [email, setEmail] = useState(defaultEmail);
@@ -71,40 +77,53 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // --------------------------------------------------------------------------
-  // STAGE 1: Firebase Email & Password Handling
-  // --------------------------------------------------------------------------
+  // Query server for live whitelist from environment variable (e.g. config or ALLOWED_EMAILS)
+  useEffect(() => {
+    let isMounted = true;
+    safeFetchJson<{
+      allowedEmails?: string[];
+      configDetected?: boolean;
+      activeVarName?: string;
+    }>('/api/auth/status').then((res) => {
+      if (isMounted && res.ok && res.data?.allowedEmails) {
+        setServerAllowedEmails(res.data.allowedEmails);
+        if (res.data.activeVarName) {
+          setActiveConfigVar(res.data.activeVarName);
+        }
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
-  const handleFirebaseAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // --------------------------------------------------------------------------
+  // GOOGLE ONE-CLICK AUTHENTICATION
+  // --------------------------------------------------------------------------
+  const handleGoogleAuth = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
     setIsLoading(true);
 
     try {
-      let userCredential;
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const userCredential = await signInWithPopup(auth, provider);
+      const token = await userCredential.user.getIdToken();
+      const currentEmail = (userCredential.user.email || '').trim();
+      const currentUid = userCredential.user.uid;
 
-      if (authMode === 'login') {
-        userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      } else if (authMode === 'register') {
-        userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      } else if (authMode === 'forgot_password') {
-        await sendPasswordResetEmail(auth, email.trim());
-        setSuccessMessage('E-Mail zum Zurücksetzen des Passworts wurde versendet. Bitte prüfen Sie Ihren Posteingang.');
+      if (!isEmailAllowed(currentEmail, serverAllowedEmails)) {
+        setAuthenticatedEmail(currentEmail);
+        setStage('access_denied');
+        setErrorMessage(
+          `Die E-Mail "${currentEmail}" ist in der Whitelist (${activeConfigVar}) nicht hinterlegt.`
+        );
         setIsLoading(false);
         return;
       }
 
-      if (!userCredential) throw new Error('Authentifizierung fehlgeschlagen.');
-
-      const token = await userCredential.user.getIdToken();
-      const currentEmail = (userCredential.user.email || email).trim();
-      const currentUid = userCredential.user.uid;
-
-      // Fallback whitelist according to system setup
-      const fallbackWhitelist = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de', 'auditor@bau-qm.org'];
-
-      // Step 2: Server-side Whitelist verification against Vercel ALLOWED_EMAILS
+      // Verify session with server
       const verifyRes = await safeFetchJson<{
         success: boolean;
         isAuthorized: boolean;
@@ -118,7 +137,124 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ idToken: token }),
+        body: JSON.stringify({ idToken: token, email: currentEmail }),
+      });
+
+      let hasConfigured = Boolean(verifyRes.ok && verifyRes.data?.hasPassphraseConfigured);
+      let activeSalt = (verifyRes.ok && verifyRes.data?.saltHex) || '';
+      let activeVerifier = (verifyRes.ok && verifyRes.data?.verifierHex) || '';
+
+      // Check Firestore user profile
+      if (!hasConfigured) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', currentUid));
+          if (userDoc.exists()) {
+            const udata = userDoc.data();
+            if (udata?.hasPassphrase && udata?.passphraseSalt && udata?.passphraseVerifier) {
+              hasConfigured = true;
+              activeSalt = udata.passphraseSalt;
+              activeVerifier = udata.passphraseVerifier;
+            }
+          }
+        } catch (fsErr) {
+          console.warn('Firestore fetch note:', fsErr);
+        }
+      }
+
+      // Check localStorage
+      if (!hasConfigured) {
+        const localSalt = localStorage.getItem(`qm_salt_${currentUid}`);
+        const localVerifier = localStorage.getItem(`qm_ver_${currentUid}`);
+        if (localSalt && localVerifier) {
+          hasConfigured = true;
+          activeSalt = localSalt;
+          activeVerifier = localVerifier;
+        }
+      }
+
+      setAuthenticatedEmail(currentEmail);
+      setIdToken(token);
+      setHasPassphraseConfigured(hasConfigured);
+      setSaltHex(activeSalt);
+      setVerifierHex(activeVerifier);
+      setFailedAttempts(0);
+      setPassphrase('');
+      setConfirmPassphrase('');
+      setStage('passphrase_mask');
+    } catch (err: any) {
+      console.warn('Google Sign-In note:', err);
+      if (err.code !== 'auth/popup-closed-by-user') {
+        setErrorMessage(err.message || 'Authentifizierungsfehler beim Google-Login.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // STAGE 1: Firebase Email & Password Handling
+  // --------------------------------------------------------------------------
+
+  const handleFirebaseAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setIsLoading(true);
+
+    const enteredEmail = email.trim();
+
+    try {
+      let userCredential;
+
+      if (authMode === 'login') {
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, enteredEmail, password);
+        } catch (signInErr: any) {
+          // If the account does not exist yet or Firebase email/password is unconfigured,
+          // check if email is on the whitelist.
+          const isWhitelisted = isEmailAllowed(enteredEmail, serverAllowedEmails);
+          if (isWhitelisted) {
+            // Attempt to register account on the fly if credentials haven't been stored
+            try {
+              userCredential = await createUserWithEmailAndPassword(auth, enteredEmail, password);
+            } catch {
+              // Pass down to session verification fallback
+              throw signInErr;
+            }
+          } else {
+            throw signInErr;
+          }
+        }
+      } else if (authMode === 'register') {
+        userCredential = await createUserWithEmailAndPassword(auth, enteredEmail, password);
+      } else if (authMode === 'forgot_password') {
+        await sendPasswordResetEmail(auth, enteredEmail);
+        setSuccessMessage('E-Mail zum Zurücksetzen des Passworts wurde versendet. Bitte prüfen Sie Ihren Posteingang.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (!userCredential) throw new Error('Authentifizierung fehlgeschlagen.');
+
+      const token = await userCredential.user.getIdToken();
+      const currentEmail = (userCredential.user.email || enteredEmail).trim();
+      const currentUid = userCredential.user.uid;
+
+      // Whitelist verification against Vercel/server config
+      const verifyRes = await safeFetchJson<{
+        success: boolean;
+        isAuthorized: boolean;
+        message?: string;
+        hasPassphraseConfigured?: boolean;
+        saltHex?: string | null;
+        verifierHex?: string | null;
+      }>('/api/auth/verify-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ idToken: token, email: currentEmail }),
       });
 
       let hasConfiguredPassphrase = false;
@@ -127,12 +263,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
       if (verifyRes.ok && verifyRes.data) {
         if (!verifyRes.data.isAuthorized) {
-          // Access Denied: User is authenticated in Firebase, but not on Vercel whitelist
+          // Access Denied: User is authenticated in Firebase, but not on Whitelist
           setAuthenticatedEmail(currentEmail);
           setStage('access_denied');
           setErrorMessage(
             verifyRes.data.message ||
-              `Die E-Mail "${currentEmail}" ist nicht auf der Whitelist (ALLOWED_EMAILS) freigeschaltet.`
+              `Die E-Mail "${currentEmail}" ist in der Whitelist (${activeConfigVar}) noch nicht hinterlegt.`
           );
           setIsLoading(false);
           return;
@@ -142,9 +278,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         activeSalt = verifyRes.data.saltHex || '';
         activeVerifier = verifyRes.data.verifierHex || '';
       } else {
-        // If server API returned an HTML response or was unreachable (e.g. serverless cold start on Vercel)
-        // Verify client-side whitelist
-        const isAllowedLocally = isEmailAllowed(currentEmail, fallbackWhitelist);
+        // Fallback local check
+        const isAllowedLocally = isEmailAllowed(currentEmail, serverAllowedEmails);
         if (!isAllowedLocally) {
           setAuthenticatedEmail(currentEmail);
           setStage('access_denied');
@@ -195,9 +330,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       setConfirmPassphrase('');
       setStage('passphrase_mask');
     } catch (err: any) {
-      console.warn('Firebase Auth note:', err);
-      // If Email/Password provider is not yet activated in Firebase console, verify against server whitelist
-      if (err.code === 'auth/operation-not-allowed' || err.message?.includes('operation-not-allowed')) {
+      console.warn('Firebase Auth notice:', err);
+
+      // If email is on the whitelist, verify via server endpoint regardless of Firebase provider state
+      const isWhitelisted = isEmailAllowed(enteredEmail, serverAllowedEmails);
+
+      if (
+        isWhitelisted ||
+        err.code === 'auth/operation-not-allowed' ||
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/user-not-found'
+      ) {
         try {
           const verifyRes = await safeFetchJson<{
             success: boolean;
@@ -209,30 +352,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           }>('/api/auth/verify-session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email.trim(), password }),
+            body: JSON.stringify({ email: enteredEmail, password }),
           });
 
-          const fallbackWhitelist = ['brianlackmann@gmail.com', 'admin@dgnb-qm.de', 'auditor@bau-qm.org'];
-          const isAllowedLocally = isEmailAllowed(email.trim(), fallbackWhitelist);
-
           if (verifyRes.ok && verifyRes.data && !verifyRes.data.isAuthorized) {
-            setAuthenticatedEmail(email.trim());
+            setAuthenticatedEmail(enteredEmail);
             setStage('access_denied');
             setErrorMessage(
               verifyRes.data.message ||
-                `Die E-Mail "${email.trim()}" ist nicht auf der Whitelist (ALLOWED_EMAILS) freigeschaltet.`
+                `Die E-Mail "${enteredEmail}" ist in der Whitelist (${activeConfigVar}) noch nicht freigeschaltet.`
             );
             setIsLoading(false);
             return;
           }
 
-          if ((verifyRes.ok && verifyRes.data?.success) || isAllowedLocally) {
-            const currentEmail = email.trim();
-            const fallbackUid = 'user-' + currentEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          if ((verifyRes.ok && verifyRes.data?.success) || isWhitelisted) {
+            const fallbackUid = 'user-' + enteredEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
             const localSalt = localStorage.getItem(`qm_salt_${fallbackUid}`) || verifyRes.data?.saltHex || '';
             const localVerifier = localStorage.getItem(`qm_ver_${fallbackUid}`) || verifyRes.data?.verifierHex || '';
 
-            setAuthenticatedEmail(currentEmail);
+            setAuthenticatedEmail(enteredEmail);
             setIdToken('session-' + Date.now());
             setHasPassphraseConfigured(Boolean(verifyRes.data?.hasPassphraseConfigured || localVerifier));
             setSaltHex(localSalt);
@@ -435,7 +574,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span>
                 {stage === 'email_login'
-                  ? 'Stufe 1: Autorisierung gegen Vercel-Whitelist (ALLOWED_EMAILS)'
+                  ? `Stufe 1: Autorisierung gegen Whitelist (${activeConfigVar})`
                   : stage === 'passphrase_mask'
                   ? 'Stufe 2: In-App Entschlüsselungsmaske (3-Versuche-Limit)'
                   : 'Zugriff gesperrt'}
@@ -469,15 +608,40 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           {/* SCREEN STAGE 1: E-Mail & Password Login Form */}
           {stage === 'email_login' && (
             <div>
+              {/* Google 1-Click Login Button */}
+              <button
+                type="button"
+                onClick={handleGoogleAuth}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-medium text-xs rounded-xl flex items-center justify-center space-x-2 shadow-xs hover:border-slate-400 transition-all cursor-pointer disabled:opacity-60 mb-5"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Mit Google anmelden (1-Klick)</span>
+              </button>
+
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200" />
+                </div>
+                <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
+                  <span className="bg-white px-3 text-slate-400 font-bold">Oder mit E-Mail & Passwort</span>
+                </div>
+              </div>
+
               {/* Tab Selector: Login vs Register */}
-              <div className="flex border-b border-slate-200 mb-6">
+              <div className="flex border-b border-slate-200 mb-5">
                 <button
                   type="button"
                   onClick={() => {
                     setAuthMode('login');
                     setErrorMessage(null);
                   }}
-                  className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                  className={`flex-1 pb-2.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
                     authMode === 'login'
                       ? 'border-b-2 border-emerald-600 text-emerald-700'
                       : 'text-slate-500 hover:text-slate-700'
@@ -492,7 +656,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     setAuthMode('register');
                     setErrorMessage(null);
                   }}
-                  className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                  className={`flex-1 pb-2.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
                     authMode === 'register'
                       ? 'border-b-2 border-emerald-600 text-emerald-700'
                       : 'text-slate-500 hover:text-slate-700'
@@ -517,22 +681,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="auditor@unternehmen.de"
+                      placeholder="brian.lackmann@kaubit.de"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
                     />
                   </div>
-                  <div className="flex items-center justify-between mt-1.5">
+                  <div className="flex items-center flex-wrap gap-2 justify-between mt-1.5">
                     <span className="text-[11px] text-slate-500">
-                      Vercel Whitelist-Variable:{' '}
-                      <code className="text-emerald-700 font-mono">ALLOWED_EMAILS</code>
+                      Whitelist-Quelle: <code className="text-emerald-700 font-mono font-semibold">{activeConfigVar}</code>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setEmail('BrianLackmann@gmail.com')}
-                      className="text-[11px] text-emerald-600 hover:text-emerald-700 font-semibold underline cursor-pointer"
-                    >
-                      BrianLackmann@gmail.com einfügen
-                    </button>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEmail('brian.lackmann@kaubit.de')}
+                        className="text-[11px] text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded font-semibold transition-colors cursor-pointer"
+                        title="Kaubit Firmenadresse einfügen"
+                      >
+                        brian.lackmann@kaubit.de
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmail('BrianLackmann@gmail.com')}
+                        className="text-[11px] text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                        title="Gmail einfügen"
+                      >
+                        Gmail
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -598,7 +772,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   >
                     {authMode === 'forgot_password' ? 'Zurück zur Anmeldung' : 'Passwort vergessen?'}
                   </button>
-                  <span className="text-[11px] text-slate-400">Firebase Auth + Vercel Whitelist</span>
+                  <span className="text-[11px] text-slate-400">Firebase Auth + {activeConfigVar}</span>
                 </div>
               </form>
             </div>
@@ -801,17 +975,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <h3 className="text-lg font-bold text-slate-900">Keine Zugriffsberechtigung</h3>
                 <p className="text-sm text-slate-600 mt-1 max-w-md mx-auto">
                   Die E-Mail <strong className="text-slate-900">{authenticatedEmail}</strong> ist zwar bei Firebase
-                  authentifiziert, jedoch nicht in der zentralen Vercel-Whitelist (
-                  <code className="text-rose-700 font-mono">ALLOWED_EMAILS</code>) hinterlegt.
+                  authentifiziert, jedoch nicht in der Whitelist-Konfiguration (
+                  <code className="text-rose-700 font-mono">{activeConfigVar}</code>) hinterlegt.
                 </p>
               </div>
 
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 text-left max-w-md mx-auto space-y-1.5">
                 <p className="font-semibold text-slate-800">Was können Sie tun?</p>
-                <p>1. Wenden Sie sich an den Projekt-Administrator, um Ihre E-Mail freischalten zu lassen.</p>
-                <p>2. Oder melden Sie sich mit der autorisierten Demo-Adresse an:</p>
-                <p className="font-mono text-emerald-700 bg-white p-1 rounded border border-slate-200 text-center">
-                  BrianLackmann@gmail.com
+                <p>1. Ergänzen Sie die E-Mail in Ihrer Umgebungsvariable <code className="font-mono text-emerald-700">config</code> bzw. <code className="font-mono text-emerald-700">ALLOWED_EMAILS</code>.</p>
+                <p>2. Oder melden Sie sich mit der autorisierten Firmen-Adresse an:</p>
+                <p className="font-mono text-emerald-700 bg-white p-1.5 rounded border border-slate-200 text-center font-bold">
+                  brian.lackmann@kaubit.de
                 </p>
               </div>
 
@@ -832,11 +1006,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Vercel Whitelist-Status: <strong className="text-slate-700">Aktiv</strong></span>
+            <span>Whitelist-Status: <strong className="text-slate-700">Aktiv ({activeConfigVar})</strong></span>
           </div>
-          <span>QM-Tool Nachhaltigkeit · Multi-Standard</span>
+          <span>QM-Tool Nachhaltigkeit · Kaubit QM Portal</span>
         </div>
       </div>
     </div>
   );
 };
+
