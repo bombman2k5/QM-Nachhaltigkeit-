@@ -120,6 +120,30 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
             Audit-ID: {result.auditMetadata.auditId}
           </div>
         </div>
+
+        {/* Provisional & Assumptions Notices */}
+        {(result.isProvisional || (result.assumptions && result.assumptions.length > 0)) && (
+          <div className="mt-4 space-y-2">
+            {result.isProvisional && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start space-x-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Vorläufige Einstufung (Manuelle Prüfung empfohlen):</strong> Mindestens ein Parameter enthält eine Zusatzbedingung (z. B. weichmacher-/konservierungsmittelfrei), eine mehrdeutige Angabe oder einen nicht im PDF-Textlayer verifizierten Beleg. Bitte prüfen Sie die unten markierten Parameter.
+                </div>
+              </div>
+            )}
+            {result.assumptions && result.assumptions.length > 0 && (
+              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 text-blue-900 text-xs space-y-1">
+                <div className="font-bold">Dokumentierte Prüfannahmen:</div>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5">
+                  {result.assumptions.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Standards Tiles Grid (Only the ones selected by the user!) */}
@@ -270,9 +294,49 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
                           )}
                           <span>{param.parameterName}</span>
                         </div>
+                        {param.needsManualReview && (
+                          <span className="inline-flex items-center space-x-1 mt-1 text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                            <AlertTriangle className="w-2.5 h-2.5 text-amber-600" />
+                            <span>Bitte manuell prüfen</span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 font-mono font-medium text-slate-800">
-                        {param.productValue}
+                        <div>{param.productValue}</div>
+                        {param.evidence && (
+                          <div className="mt-1 space-y-0.5 font-sans">
+                            <span
+                              className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                param.evidence.verification === 'verified'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : param.evidence.verification === 'partial'
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : param.evidence.verification === 'manual'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : param.evidence.verification === 'no-text-layer'
+                                  ? 'bg-slate-200 text-slate-700'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {param.evidence.verification === 'verified'
+                                ? `✓ Im PDF verifiziert${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
+                                : param.evidence.verification === 'partial'
+                                ? `~ Teilweise belegt${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
+                                : param.evidence.verification === 'manual'
+                                ? '✎ Manuell bestätigt'
+                                : param.evidence.verification === 'no-text-layer'
+                                ? 'Scan ohne Textlayer'
+                                : param.evidence.source === 'missing'
+                                ? 'Kein Beleg im PDF'
+                                : '⚠ Nicht im PDF-Text verifiziert'}
+                            </span>
+                            {param.evidence.quote && (
+                              <div className="text-[10px] text-slate-500 italic truncate max-w-xs" title={param.evidence.quote}>
+                                „{param.evidence.quote}“
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
                         {param.requiredForQS4}

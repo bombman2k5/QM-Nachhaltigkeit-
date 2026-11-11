@@ -20,6 +20,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<User | null>(auth.currentUser);
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [authenticatedEmail, setAuthenticatedEmail] = useState<string>('');
+  const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(1);
 
   // Multiple sustainability standards list (DGNB, QNG, BNB, plus custom uploads)
@@ -47,8 +48,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLoginSuccess = (email: string) => {
+  const handleLoginSuccess = (email: string, _sessionToken: string, key: CryptoKey) => {
     setAuthenticatedEmail(email);
+    setEncryptionKey(key);
     setIsUnlocked(true);
   };
 
@@ -58,6 +60,7 @@ export default function App() {
     } catch {}
     setAuthUser(null);
     setAuthenticatedEmail('');
+    setEncryptionKey(null);
     setIsUnlocked(false);
   };
 
@@ -131,6 +134,7 @@ export default function App() {
             onAnalysisComplete={handleAnalysisComplete}
             projectName={projectName}
             userEmail={authenticatedEmail || 'auditor@bau-qm.org'}
+            encryptionKey={encryptionKey}
           />
         ) : currentStep === 3 && evaluationResult ? (
           <Step3Evaluation

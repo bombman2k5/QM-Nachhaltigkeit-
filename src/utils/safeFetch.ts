@@ -1,7 +1,9 @@
+import { auth } from '../firebase/config';
+
 /**
  * Safe fetch utility that prevents "JSON.parse: unexpected character" errors
- * when serverless hosts (like Vercel) return HTML error pages (404/500/SPA redirect)
- * instead of expected JSON payloads.
+ * when serverless hosts (like Vercel) return HTML error pages (404/413/500/SPA redirect)
+ * instead of expected JSON payloads, and automatically attaches the Firebase Bearer token.
  */
 
 export interface SafeFetchResult<T = any> {
@@ -17,7 +19,33 @@ export async function safeFetchJson<T = any>(
   init?: RequestInit
 ): Promise<SafeFetchResult<T>> {
   try {
-    const res = await fetch(input, init);
+    const headers = new Headers(init?.headers || {});
+
+    if (!headers.has('Authorization') && auth.currentUser) {
+      try {
+        const token = await auth.currentUser.getIdToken();
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+      } catch {
+        // Proceed without token if getIdToken fails transiently
+      }
+    }
+
+    const res = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    if (res.status === 413) {
+      return {
+        ok: false,
+        status: 413,
+        error:
+          'Die Datei ist für die Serverless-Schnittstelle zu groß (Vercel-Limit: ca. 3,2 MB PDF-Originalgröße). Bitte komprimieren Sie das PDF oder laden Sie die relevanten Seiten hoch.',
+      };
+    }
+
     const contentType = res.headers.get('content-type') || '';
     const text = await res.text();
 

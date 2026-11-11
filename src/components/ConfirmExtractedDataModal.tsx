@@ -1,18 +1,23 @@
-import React, { useState } from 'react';
-import { CriteriaRow, ExtractedDocumentData } from '../types/dgnb';
+import React, { useState, useEffect } from 'react';
+import {
+  ConfirmedEvidence,
+  CriteriaRow,
+  ExtractedDocumentData,
+  ExtractedFieldQuote,
+  ParameterEvidence,
+  Verification,
+} from '../types/dgnb';
 import { evaluateTestDateAge } from '../utils/dgnbEvaluation';
 import {
   ShieldCheck,
-  FileText,
   AlertCircle,
   Quote,
   Check,
   X,
-  ExternalLink,
-  Layers,
   Sparkles,
   Calendar,
-  Clock,
+  Edit3,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ConfirmExtractedDataModalProps {
@@ -30,6 +35,7 @@ interface ConfirmExtractedDataModalProps {
     hasBauteilekatalog: boolean;
     summarySnippet: string;
     documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+    evidence: ConfirmedEvidence;
   }) => void;
   onCancel: () => void;
 }
@@ -41,33 +47,103 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
   onConfirm,
   onCancel,
 }) => {
+  const [productName, setProductName] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
+  const [criteriaRowNr, setCriteriaRowNr] = useState('2');
+  const [vocContent, setVocContent] = useState('');
+  const [vocTestDate, setVocTestDate] = useState('');
+  const [svhcStatus, setSvhcStatus] = useState('');
+  const [certificates, setCertificates] = useState<string[]>([]);
+  const [certificateInput, setCertificateInput] = useState('');
+  const [hasBauteilekatalog, setHasBauteilekatalog] = useState<boolean>(true);
+  const [summarySnippet, setSummarySnippet] = useState('');
+  const [editedFields, setEditedFields] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (data) {
+      setProductName(data.productName || '');
+      setManufacturer(data.manufacturer || '');
+      setCriteriaRowNr(data.suggestedCriteriaNr || '2');
+      setVocContent(data.vocContent || '');
+      setVocTestDate(data.vocTestDate || '');
+      setSvhcStatus(data.svhcStatus || '');
+      setCertificates(data.certificates || []);
+      setCertificateInput('');
+      setHasBauteilekatalog(data.hasBauteilekatalog ?? true);
+      setSummarySnippet(data.summarySnippet || '');
+      setEditedFields({});
+    }
+  }, [data]);
+
   if (!isOpen || !data) return null;
 
-  const [productName, setProductName] = useState(data.productName || '');
-  const [manufacturer, setManufacturer] = useState(data.manufacturer || '');
-  const [criteriaRowNr, setCriteriaRowNr] = useState(data.suggestedCriteriaNr || '1');
-  const [vocContent, setVocContent] = useState(data.vocContent || '');
-  const [vocTestDate, setVocTestDate] = useState(data.vocTestDate || '');
-  const [svhcStatus, setSvhcStatus] = useState(data.svhcStatus || '');
-  const [certificates, setCertificates] = useState<string[]>(data.certificates || []);
-  const [certificateInput, setCertificateInput] = useState('');
-  const [hasBauteilekatalog, setHasBauteilekatalog] = useState<boolean>(
-    data.hasBauteilekatalog ?? true
-  );
-  const [summarySnippet, setSummarySnippet] = useState(data.summarySnippet || '');
+  const markEdited = (field: string) => {
+    setEditedFields((prev) => ({ ...prev, [field]: true }));
+  };
 
   const handleAddCertificate = () => {
     if (certificateInput.trim()) {
       setCertificates([...certificates, certificateInput.trim()]);
       setCertificateInput('');
+      markEdited('certificates');
     }
   };
 
   const handleRemoveCertificate = (index: number) => {
     setCertificates(certificates.filter((_, i) => i !== index));
+    markEdited('certificates');
+  };
+
+  const getQuoteForField = (fieldName: string): ExtractedFieldQuote | undefined => {
+    return data.fieldQuotes?.find((q) => q.field === fieldName);
+  };
+
+  const buildFieldEvidence = (
+    fieldName: string,
+    currentVal: string
+  ): ParameterEvidence => {
+    const q = getQuoteForField(fieldName);
+    const defaultSource =
+      data.documentType === 'pruefbericht'
+        ? 'report'
+        : data.documentType === 'sdb'
+        ? 'sdb'
+        : 'sdb';
+
+    if (!currentVal.trim()) {
+      return {
+        source: 'missing',
+        verification: 'unverified',
+      };
+    }
+
+    if (editedFields[fieldName]) {
+      return {
+        source: 'manual',
+        quote: q?.quote,
+        page: q?.page,
+        verification: 'manual',
+      };
+    }
+
+    return {
+      source: defaultSource,
+      quote: q?.quote,
+      page: q?.page,
+      verification:
+        q?.verification ||
+        (data.hasTextLayer === false ? 'no-text-layer' : 'unverified'),
+    };
   };
 
   const handleApply = () => {
+    const evidence: ConfirmedEvidence = {
+      voc: buildFieldEvidence('vocContent', vocContent),
+      testDate: buildFieldEvidence('vocTestDate', vocTestDate),
+      svhc: buildFieldEvidence('svhcStatus', svhcStatus),
+      label: buildFieldEvidence('certificates', certificates.join(', ')),
+    };
+
     onConfirm({
       productName: productName.trim(),
       manufacturer: manufacturer.trim(),
@@ -79,13 +155,64 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
       hasBauteilekatalog,
       summarySnippet: summarySnippet.trim(),
       documentType: data.documentType,
+      evidence,
     });
   };
 
   const testAgeEval = evaluateTestDateAge(vocTestDate);
 
-  const getQuoteForField = (fieldName: string) => {
-    return data.fieldQuotes?.find((q) => q.field === fieldName);
+  const renderVerificationBadge = (fieldName: string, currentValue: string) => {
+    if (!currentValue.trim()) {
+      return (
+        <span className="text-[10px] text-slate-500 font-medium bg-slate-200/70 px-1.5 py-0.5 rounded">
+          Nicht im PDF angegeben
+        </span>
+      );
+    }
+
+    if (editedFields[fieldName]) {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] text-blue-800 font-semibold bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200">
+          <Edit3 className="w-2.5 h-2.5" />
+          <span>Manuell angepasst</span>
+        </span>
+      );
+    }
+
+    const q = getQuoteForField(fieldName);
+    const v: Verification =
+      q?.verification || (data.hasTextLayer === false ? 'no-text-layer' : 'unverified');
+    const pageInfo = q?.page ? ` (S. ${q.page})` : q?.pageOrSection ? ` (${q.pageOrSection})` : '';
+
+    if (v === 'verified') {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] text-emerald-800 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
+          <Check className="w-2.5 h-2.5 text-emerald-700" />
+          <span>Im PDF verifiziert{pageInfo}</span>
+        </span>
+      );
+    }
+    if (v === 'partial') {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] text-amber-900 font-semibold bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+          <AlertTriangle className="w-2.5 h-2.5 text-amber-700" />
+          <span>Teilweise belegt{pageInfo} – bitte prüfen</span>
+        </span>
+      );
+    }
+    if (v === 'no-text-layer') {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] text-slate-700 font-semibold bg-slate-200 px-1.5 py-0.5 rounded border border-slate-300">
+          <span>Scan ohne Textlayer – manuell prüfen</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center space-x-1 text-[10px] text-rose-800 font-semibold bg-rose-100 px-1.5 py-0.5 rounded border border-rose-300">
+        <AlertCircle className="w-2.5 h-2.5 text-rose-600" />
+        <span>Nicht im PDF-Textlayer gefunden – bitte prüfen</span>
+      </span>
+    );
   };
 
   return (
@@ -111,7 +238,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 </span>
               </div>
               <h2 className="text-lg font-bold text-white mt-1">
-                KI-ausgelesene Daten prüfen & bestätigen
+                KI-ausgelesene Daten & Textlayer-Belege prüfen
               </h2>
             </div>
           </div>
@@ -127,29 +254,43 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
         <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-3 flex items-center space-x-2.5 text-xs text-emerald-900">
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>
-            <strong>Revisionssichere Übernahme:</strong> Bitte kontrollieren Sie die extrahierten Kennwerte anhand der Fundstellen aus dem PDF, bevor Sie diese in das Prüfformular übernehmen.
+            <strong>Automatische Quellenprüfung aktiv:</strong> Jedes KI-Zitat wurde gegen den PDF-Textlayer abgeglichen. Grün markierte Werte wurden wörtlich im Dokument gefunden; gelb/rot markierte Werte bitte kurz kontrollieren.
           </span>
         </div>
 
         {/* Modal Content / Form */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs">
+          {/* Warnings from Server Verification */}
+          {data.warnings && data.warnings.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 space-y-1">
+              <div className="flex items-center space-x-1.5 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Hinweise aus der automatischen PDF-Quellenprüfung:</span>
+              </div>
+              <ul className="list-disc list-inside text-[11px] space-y-0.5 text-amber-800">
+                {data.warnings.map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Grid: Product & Manufacturer */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
                   Erkannter Produktname
                 </label>
-                {getQuoteForField('productName') && (
-                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100/70 px-1.5 py-0.5 rounded">
-                    Im PDF gefunden
-                  </span>
-                )}
+                {renderVerificationBadge('productName', productName)}
               </div>
               <input
                 type="text"
                 value={productName}
-                onChange={(e) => setProductName(e.target.value)}
+                onChange={(e) => {
+                  setProductName(e.target.value);
+                  markEdited('productName');
+                }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 placeholder="Produktbezeichnung..."
               />
@@ -162,20 +303,19 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
             </div>
 
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
                   Erkannter Hersteller / Lieferant
                 </label>
-                {getQuoteForField('manufacturer') && (
-                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100/70 px-1.5 py-0.5 rounded">
-                    Im PDF gefunden
-                  </span>
-                )}
+                {renderVerificationBadge('manufacturer', manufacturer)}
               </div>
               <input
                 type="text"
                 value={manufacturer}
-                onChange={(e) => setManufacturer(e.target.value)}
+                onChange={(e) => {
+                  setManufacturer(e.target.value);
+                  markEdited('manufacturer');
+                }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 placeholder="Herstellername..."
               />
@@ -195,7 +335,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 Zugeordnete DGNB ENV1.2 Bauteilgruppe
               </label>
               <span className="text-[11px] text-slate-500">
-                Empfehlung basierend auf dem Verwendungszweck im Dokument
+                Automatische Zuordnung (QNG &amp; BNB werden synchron abgeleitet)
               </span>
             </div>
             <select
@@ -209,32 +349,38 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 </option>
               ))}
             </select>
+            {data.suggestionReason && (
+              <p className="text-[11px] text-slate-600 italic">
+                Begründung für Vorschlag: {data.suggestionReason}
+              </p>
+            )}
           </div>
 
           {/* Environmental Parameters: VOC, Test Date & SVHC */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* VOC Content */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
                 <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                  Ermittelter VOC-Gehalt
+                  VOC-Gehalt
                 </label>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {getQuoteForField('vocContent')?.pageOrSection || 'Abschnitt 9/15'}
-                </span>
+                {renderVerificationBadge('vocContent', vocContent)}
               </div>
               <input
                 type="text"
                 value={vocContent}
-                onChange={(e) => setVocContent(e.target.value)}
+                onChange={(e) => {
+                  setVocContent(e.target.value);
+                  markEdited('vocContent');
+                }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                placeholder="z.B. < 1 g/l oder 28 g/l..."
+                placeholder="Nicht im PDF gefunden – z.B. < 1 g/l"
               />
               {getQuoteForField('vocContent')?.quote && (
                 <div className="flex items-start space-x-1.5 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
                   <Quote className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-slate-800 text-[10px]">Belegfundstelle:</strong>{' '}
+                    <strong className="text-slate-800 text-[10px]">PDF-Zitat:</strong>{' '}
                     <span>„{getQuoteForField('vocContent')?.quote}“</span>
                   </div>
                 </div>
@@ -243,21 +389,22 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
 
             {/* VOC Test Report Date */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
                 <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center space-x-1">
                   <Calendar className="w-3.5 h-3.5 text-emerald-700 inline" />
                   <span>Prüfdatum (VOC)</span>
                 </label>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {getQuoteForField('vocTestDate')?.pageOrSection || 'Laborbericht'}
-                </span>
+                {renderVerificationBadge('vocTestDate', vocTestDate)}
               </div>
               <input
                 type="text"
                 value={vocTestDate}
-                onChange={(e) => setVocTestDate(e.target.value)}
+                onChange={(e) => {
+                  setVocTestDate(e.target.value);
+                  markEdited('vocTestDate');
+                }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                placeholder="z.B. 15.05.2023 oder 2023..."
+                placeholder="z.B. 15.05.2023"
               />
 
               {/* Live Institute Age Check Indicator */}
@@ -270,12 +417,16 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 ) : testAgeEval.status === 'warning' ? (
                   <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md border border-amber-300">
                     <AlertCircle className="w-3 h-3 text-amber-600" />
-                    <span>&gt; 5 Jahre (Rezeptur-Bestätigung nötig)</span>
+                    <span>
+                      {vocTestDate.trim()
+                        ? '> 5 Jahre / unklar (Bestätigung nötig)'
+                        : 'Kein Prüfdatum angegeben'}
+                    </span>
                   </span>
                 ) : (
                   <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-rose-800 bg-rose-100/80 px-2 py-0.5 rounded-md border border-rose-300">
                     <AlertCircle className="w-3 h-3 text-rose-600" />
-                    <span>&gt; 10 Jahre / Abgelaufen</span>
+                    <span>&gt; 10 Jahre / Ungültig</span>
                   </span>
                 )}
               </div>
@@ -284,7 +435,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 <div className="flex items-start space-x-1.5 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
                   <Quote className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-slate-800 text-[10px]">Belegfundstelle:</strong>{' '}
+                    <strong className="text-slate-800 text-[10px]">PDF-Zitat:</strong>{' '}
                     <span>„{getQuoteForField('vocTestDate')?.quote}“</span>
                   </div>
                 </div>
@@ -293,26 +444,27 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
 
             {/* SVHC Status */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
                 <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                  REACH SVHC Status (≤ 0,1 % w/w)
+                  REACH SVHC (&le; 0,1 %)
                 </label>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {getQuoteForField('svhcStatus')?.pageOrSection || 'Abschnitt 3/15'}
-                </span>
+                {renderVerificationBadge('svhcStatus', svhcStatus)}
               </div>
               <input
                 type="text"
                 value={svhcStatus}
-                onChange={(e) => setSvhcStatus(e.target.value)}
+                onChange={(e) => {
+                  setSvhcStatus(e.target.value);
+                  markEdited('svhcStatus');
+                }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                placeholder="z.B. Keine SVHC > 0,1 % w/w enthalten..."
+                placeholder="z.B. Keine SVHC > 0,1 % w/w enthalten"
               />
               {getQuoteForField('svhcStatus')?.quote && (
                 <div className="flex items-start space-x-1.5 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
                   <Quote className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-slate-800 text-[10px]">Belegfundstelle:</strong>{' '}
+                    <strong className="text-slate-800 text-[10px]">PDF-Zitat:</strong>{' '}
                     <span>„{getQuoteForField('svhcStatus')?.quote}“</span>
                   </div>
                 </div>
@@ -322,13 +474,11 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
 
           {/* Certificates & Labels */}
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                Erkannte Umweltzeichen & Prüfzertifikate
+                Erkannte Umweltzeichen &amp; Prüfzertifikate
               </label>
-              <span className="text-[10px] text-slate-500">
-                z. B. Blauer Engel, EMICODE EC1 PLUS, AgBB, GISCODE
-              </span>
+              {renderVerificationBadge('certificates', certificates.join(', '))}
             </div>
 
             <div className="flex flex-wrap gap-1.5">
@@ -354,6 +504,16 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
               )}
             </div>
 
+            {getQuoteForField('certificates')?.quote && (
+              <div className="flex items-start space-x-1.5 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
+                <Quote className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-slate-800 text-[10px]">PDF-Zitat:</strong>{' '}
+                  <span>„{getQuoteForField('certificates')?.quote}“</span>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center space-x-2 pt-1">
               <input
                 type="text"
@@ -365,7 +525,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                     handleAddCertificate();
                   }
                 }}
-                placeholder="Weiteres Zertifikat ergänzen (z.B. EMICODE EC1 PLUS)..."
+                placeholder="Weiteres Zertifikat ergänzen (z.B. EMICODE EC1 PLUS, DE-UZ 102)..."
                 className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
               <button
@@ -392,28 +552,30 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 htmlFor="modal-bauteilkatalog-cb"
                 className="font-bold text-slate-900 cursor-pointer text-xs"
               >
-                Materialökologischer Bauteilekatalog & Bauüberwachungsnachweis vorhanden
+                QNG-ready / Materialökologischer Bauteilekatalog vorhanden (Standardannahme aktiv)
               </label>
               <p className="text-slate-500 text-[11px] mt-0.5">
-                Für Qualitätsstufe 3 und 4 ist laut DGNB- und BNB-Regelwerk zwingend ein Bauteilekatalog nebst baustellenbezogenem Nachweis vorgeschrieben (K.O.-Kriterium).
+                Für Qualitätsstufe 3 und 4 ist laut DGNB-Regelwerk ein Bauteilekatalog nebst baustellenbezogenem Nachweis vorgesehen. Diese Annahme wird im Prüfbericht transparent ausgewiesen.
               </p>
             </div>
           </div>
 
-          {/* Extracted text snippet */}
+          {/* Extracted verbatim text excerpts */}
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                Relevante Textpassagen für das Prüfgutachten (Dokumentation)
+                Wörtliche PDF-Textauszüge für das Prüfgutachten
               </label>
-              <span className="text-[10px] text-slate-400">Wird in das Prüfformular übernommen</span>
+              <span className="text-[10px] text-slate-500">
+                Direkt aus dem PDF-Textlayer extrahiert (keine KI-Paraphrase)
+              </span>
             </div>
             <textarea
               rows={4}
               value={summarySnippet}
               onChange={(e) => setSummarySnippet(e.target.value)}
               className="w-full p-2.5 font-mono text-[11px] bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
-              placeholder="Wortlaut aus dem Dokument..."
+              placeholder="Wörtliche Textauszüge aus dem Dokument..."
             />
           </div>
         </div>
@@ -434,7 +596,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
             className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
           >
             <Check className="w-4 h-4" />
-            <span>Werte bestätigen & ins Formular übernehmen</span>
+            <span>Werte bestätigen &amp; ins Formular übernehmen</span>
           </button>
         </div>
       </div>

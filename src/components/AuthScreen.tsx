@@ -6,9 +6,8 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { safeFetchJson } from '../utils/safeFetch';
 import {
   Shield,
   KeyRound,
@@ -21,12 +20,24 @@ import {
   RefreshCw,
   LogOut,
   HelpCircle,
+  Mail,
+  UserPlus,
+  Trash2,
+  Users,
 } from 'lucide-react';
 import {
   createPassphraseVerifier,
   verifyPassphrase,
   deriveKeyFromPassphrase,
 } from '../utils/crypto';
+import {
+  ADMIN_EMAILS,
+  isAdminEmail,
+  isCorporateEmailAuthorized,
+  loadCompanyVault,
+  saveCompanyVault,
+  updateAuthorizedEmployeeEmails,
+} from '../utils/companyVaultService';
 
 interface AuthScreenProps {
   onLoginSuccess: (email: string, sessionToken: string, encryptionKey: CryptoKey) => void;
@@ -39,31 +50,37 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   onLoginSuccess,
   currentUser: initialUser,
 }) => {
-  // Screen Stage Management
   const [stage, setStage] = useState<ScreenStage>('google_login');
   const [user, setUser] = useState<User | null>(initialUser || auth.currentUser);
 
-  // Authenticated state awaiting passphrase
   const [authenticatedEmail, setAuthenticatedEmail] = useState<string>(
     initialUser?.email || auth.currentUser?.email || ''
   );
   const [idToken, setIdToken] = useState<string>('');
   const [hasPassphraseConfigured, setHasPassphraseConfigured] = useState<boolean>(false);
+  const [isResettingPassphrase, setIsResettingPassphrase] = useState<boolean>(false);
   const [saltHex, setSaltHex] = useState<string>('');
   const [verifierHex, setVerifierHex] = useState<string>('');
+  const [authorizedEmails, setAuthorizedEmails] = useState<string[]>([...ADMIN_EMAILS]);
 
-  // Passphrase Mask State
+  // Passphrase & Corporate Email Mask State
+  const [corporateEmailInput, setCorporateEmailInput] = useState<string>('');
   const [passphrase, setPassphrase] = useState<string>('');
   const [confirmPassphrase, setConfirmPassphrase] = useState<string>('');
   const [showPassphrase, setShowPassphrase] = useState<boolean>(false);
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
+
+  // Admin Employee Account Management State
+  const [newEmployeeEmail, setNewEmployeeEmail] = useState<string>('');
+  const [isSavingEmployee, setIsSavingEmployee] = useState<boolean>(false);
 
   // UI status
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Listen to Auth State and prepare Passphrase stage if signed in via Google
+  const isAdmin = isAdminEmail(authenticatedEmail);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -73,7 +90,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         try {
           const token = await currentUser.getIdToken();
           setIdToken(token);
-          await preparePassphraseStage(currentUser, currentEmail, token);
+          await preparePassphraseStage(currentUser, token);
         } catch (err) {
           console.warn('Token fetch note:', err);
         }
@@ -87,64 +104,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Prepare Passphrase configuration & verifier
-  const preparePassphraseStage = async (currentUser: User, currentEmail: string, token: string) => {
-    let hasConfigured = false;
-    let activeSalt = '';
-    let activeVerifier = '';
-
-    // 1. Fetch from Firestore user document
-    try {
-      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-      if (userDoc.exists()) {
-        const udata = userDoc.data();
-        if (udata?.hasPassphrase && udata?.passphraseSalt && udata?.passphraseVerifier) {
-          hasConfigured = true;
-          activeSalt = udata.passphraseSalt;
-          activeVerifier = udata.passphraseVerifier;
-        }
-      }
-    } catch (fsErr) {
-      console.warn('Firestore fetch note:', fsErr);
-    }
-
-    // 2. Fallback to localStorage
-    if (!hasConfigured) {
-      const localSalt = localStorage.getItem(`qm_salt_${currentUser.uid}`);
-      const localVerifier = localStorage.getItem(`qm_ver_${currentUser.uid}`);
-      if (localSalt && localVerifier) {
-        hasConfigured = true;
-        activeSalt = localSalt;
-        activeVerifier = localVerifier;
-      }
-    }
-
-    // 3. Fallback to server verification
-    if (!hasConfigured) {
-      const verifyRes = await safeFetchJson<{
-        success: boolean;
-        hasPassphraseConfigured?: boolean;
-        saltHex?: string | null;
-        verifierHex?: string | null;
-      }>('/api/auth/verify-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ idToken: token, email: currentEmail }),
-      });
-
-      if (verifyRes.ok && verifyRes.data?.hasPassphraseConfigured) {
-        hasConfigured = true;
-        activeSalt = verifyRes.data.saltHex || '';
-        activeVerifier = verifyRes.data.verifierHex || '';
-      }
-    }
-
-    setHasPassphraseConfigured(hasConfigured);
-    setSaltHex(activeSalt);
-    setVerifierHex(activeVerifier);
+  const preparePassphraseStage = async (currentUser: User, token: string) => {
+    const vault = await loadCompanyVault(currentUser, token);
+    setHasPassphraseConfigured(vault.hasPassphraseConfigured);
+    setSaltHex(vault.saltHex);
+    setVerifierHex(vault.verifierHex);
+    setAuthorizedEmails(vault.authorizedEmails);
     setStage('passphrase_mask');
   };
 
@@ -167,7 +132,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       setAuthenticatedEmail(currentEmail);
       setIdToken(token);
 
-      await preparePassphraseStage(userCredential.user, currentEmail, token);
+      await preparePassphraseStage(userCredential.user, token);
     } catch (err: any) {
       console.warn('Google Sign-In note:', err);
       if (err.code !== 'auth/popup-closed-by-user') {
@@ -181,7 +146,73 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   // --------------------------------------------------------------------------
-  // IN-APP PASSPHRASE HANDLING (STAGE 2) - Strict 3-attempt lockout
+  // ADMIN: ADD OR REMOVE EMPLOYEE CORPORATE EMAIL ACCOUNT
+  // --------------------------------------------------------------------------
+  const handleAddEmployeeAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+    const clean = newEmployeeEmail.trim().toLowerCase();
+    if (!clean || !clean.includes('@') || !clean.includes('.')) {
+      setErrorMessage('Bitte geben Sie eine gültige betriebliche E-Mail-Adresse ein.');
+      return;
+    }
+
+    setIsSavingEmployee(true);
+    setErrorMessage(null);
+    try {
+      const updated = Array.from(new Set([...authorizedEmails, clean]));
+      if (saltHex && verifierHex) {
+        const saved = await updateAuthorizedEmployeeEmails(
+          user,
+          idToken,
+          { saltHex, verifierHex },
+          updated
+        );
+        setAuthorizedEmails(saved);
+      } else {
+        setAuthorizedEmails(updated);
+      }
+      setNewEmployeeEmail('');
+      setSuccessMessage(`Mitarbeiter-Konto "${clean}" wurde freigeschaltet.`);
+    } catch (err: any) {
+      setErrorMessage('Fehler beim Anlegen des Mitarbeiter-Kontos: ' + (err.message || String(err)));
+    } finally {
+      setIsSavingEmployee(false);
+    }
+  };
+
+  const handleRemoveEmployeeAccount = async (emailToRemove: string) => {
+    if (!isAdmin) return;
+    if (isAdminEmail(emailToRemove)) {
+      setErrorMessage('Das Administrator-Konto kann nicht entfernt werden.');
+      return;
+    }
+
+    setIsSavingEmployee(true);
+    setErrorMessage(null);
+    try {
+      const updated = authorizedEmails.filter((e) => e.toLowerCase() !== emailToRemove.toLowerCase());
+      if (saltHex && verifierHex) {
+        const saved = await updateAuthorizedEmployeeEmails(
+          user,
+          idToken,
+          { saltHex, verifierHex },
+          updated
+        );
+        setAuthorizedEmails(saved);
+      } else {
+        setAuthorizedEmails(updated);
+      }
+      setSuccessMessage(`Freigabe für "${emailToRemove}" wurde entfernt.`);
+    } catch (err: any) {
+      setErrorMessage('Fehler beim Entfernen des Kontos: ' + (err.message || String(err)));
+    } finally {
+      setIsSavingEmployee(false);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // IN-APP PASSPHRASE & CORPORATE EMAIL HANDLING (STAGE 2)
   // --------------------------------------------------------------------------
   const handlePassphraseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,102 +221,100 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsLoading(true);
 
     try {
-      const currentUid = user?.uid || 'user-' + authenticatedEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      if (!hasPassphraseConfigured || isResettingPassphrase) {
+        if (!isAdmin) {
+          setErrorMessage(
+            'Nur der Administrator ist berechtigt, die Unternehmens-Passphrase festzulegen.'
+          );
+          setIsLoading(false);
+          return;
+        }
 
-      if (!hasPassphraseConfigured) {
-        // First-time setup of passphrase
         if (passphrase.trim().length < 8) {
-          setErrorMessage('Die Verschlüsselungsphrase muss mindestens 8 Zeichen lang sein.');
+          setErrorMessage('Die Unternehmens-Passphrase muss mindestens 8 Zeichen lang sein.');
           setIsLoading(false);
           return;
         }
 
         if (passphrase !== confirmPassphrase) {
-          setErrorMessage('Die Bestätigung stimmt nicht mit der gewählten Verschlüsselungsphrase überein.');
+          setErrorMessage('Die Bestätigung stimmt nicht mit der gewählten Passphrase überein.');
           setIsLoading(false);
           return;
         }
 
-        // Generate client-side cryptographic salt and verifier
-        const { saltHex: newSalt, verifierHex: newVerifier } = await createPassphraseVerifier(passphrase);
+        const { saltHex: newSalt, verifierHex: newVerifier } =
+          await createPassphraseVerifier(passphrase);
 
-        // 1. Save verifier to Firestore
-        try {
-          if (user) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: authenticatedEmail,
-              hasPassphrase: true,
-              passphraseSalt: newSalt,
-              passphraseVerifier: newVerifier,
-              updatedAt: new Date().toISOString(),
-            }, { merge: true });
-          }
-        } catch (fsWriteErr) {
-          console.warn('Firestore passphrase write note:', fsWriteErr);
-        }
-
-        // 2. Save verifier to localStorage as local fallback
-        try {
-          localStorage.setItem(`qm_salt_${currentUid}`, newSalt);
-          localStorage.setItem(`qm_ver_${currentUid}`, newVerifier);
-        } catch {}
-
-        // 3. Save verifier to server
-        await safeFetchJson('/api/auth/save-passphrase-verifier', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({
-            idToken,
-            email: authenticatedEmail,
-            saltHex: newSalt,
-            verifierHex: newVerifier,
-          }),
+        const updatedEmails = await saveCompanyVault(user, idToken, {
+          saltHex: newSalt,
+          verifierHex: newVerifier,
+          authorizedEmails,
         });
 
-        // Derive active session encryption key
+        try {
+          if (user) {
+            await setDoc(
+              doc(db, 'users', user.uid),
+              {
+                uid: user.uid,
+                email: authenticatedEmail,
+                corporateEmail: corporateEmailInput.trim().toLowerCase() || authenticatedEmail,
+                role: 'admin',
+                hasPassphrase: true,
+                passphraseSalt: newSalt,
+                passphraseVerifier: newVerifier,
+              },
+              { merge: true }
+            );
+          }
+        } catch (fsWriteErr) {
+          console.warn('Firestore user profile write note:', fsWriteErr);
+        }
+
+        setSaltHex(newSalt);
+        setVerifierHex(newVerifier);
+        setAuthorizedEmails(updatedEmails);
+        setHasPassphraseConfigured(true);
+        setIsResettingPassphrase(false);
+
         const saltBytes = new Uint8Array(newSalt.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
         const encryptionKey = await deriveKeyFromPassphrase(passphrase, saltBytes);
 
-        setSuccessMessage('Unternehmens-Verschlüsselungsphrase erfolgreich eingerichtet!');
+        setSuccessMessage('Unternehmens-Tresor erfolgreich durch Administrator eingerichtet!');
         setTimeout(() => {
           onLoginSuccess(authenticatedEmail, idToken, encryptionKey);
         }, 300);
       } else {
-        // Existing user unlocking vault
-        let isMatch = false;
-
-        if (saltHex && verifierHex) {
-          isMatch =
-            (await verifyPassphrase(passphrase, saltHex, verifierHex)) ||
-            passphrase.trim() === 'QM-Tool-2024' ||
-            passphrase.trim() === 'DGNB-ENV12-2023';
-        } else {
-          // Fallback check
-          isMatch =
-            passphrase.trim() === 'QM-Tool-2024' ||
-            passphrase.trim() === 'DGNB-ENV12-2023' ||
-            passphrase.length >= 8;
+        // Existing vault: Verify BOTH registered corporate email AND company passphrase
+        const cleanCorpEmail = corporateEmailInput.trim().toLowerCase();
+        if (!cleanCorpEmail || !cleanCorpEmail.includes('@')) {
+          setErrorMessage(
+            'Bitte geben Sie zusätzlich zur Passphrase Ihre freigeschaltete betriebliche E-Mail-Adresse ein.'
+          );
+          setIsLoading(false);
+          return;
         }
 
-        if (!isMatch) {
+        const isEmailAllowed = isCorporateEmailAuthorized(cleanCorpEmail, authorizedEmails);
+        const isPassphraseValid =
+          Boolean(saltHex && verifierHex) &&
+          (await verifyPassphrase(passphrase, saltHex, verifierHex));
+
+        if (!isEmailAllowed || !isPassphraseValid) {
           const newFailedAttempts = failedAttempts + 1;
           setFailedAttempts(newFailedAttempts);
 
           if (newFailedAttempts >= 3) {
-            // STRICT K.O. RULE: 3 failed attempts -> immediate logout and return to Google Login
             await signOut(auth);
             setUser(null);
             setAuthenticatedEmail('');
             setStage('google_login');
             setErrorMessage(
-              'Sicherheits-Lockout: Sie haben dreimal eine falsche Verschlüsselungsphrase eingegeben. Aus Datenschutzgründen wurden Sie abgemeldet. Bitte melden Sie sich erneut an.'
+              'Sicherheits-Lockout: Dreimalige Fehleingabe von betrieblicher E-Mail-Adresse oder Unternehmens-Passphrase. Sie wurden automatisch abgemeldet.'
             );
             setPassphrase('');
             setConfirmPassphrase('');
+            setCorporateEmailInput('');
             setFailedAttempts(0);
             setIsLoading(false);
             return;
@@ -293,21 +322,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
           const remaining = 3 - newFailedAttempts;
           setErrorMessage(
-            `Falsche Verschlüsselungsphrase! Der Zugang wird verweigert. Verbleibende Versuche: ${remaining} (nach 3 Fehlversuchen erfolgt die automatische Abmeldung).`
+            !isEmailAllowed
+              ? `Zugang verweigert: Für die betriebliche E-Mail-Adresse "${cleanCorpEmail}" wurde vom Administrator kein Konto freigeschaltet (oder die Passphrase ist ungültig). Verbleibende Versuche: ${remaining}.`
+              : `Falsche Unternehmens-Passphrase! Der Zugang wird verweigert. Verbleibende Versuche: ${remaining} (nach 3 Fehlversuchen erfolgt die automatische Abmeldung).`
           );
           setIsLoading(false);
           return;
         }
 
-        // Success: Derive active encryption key
-        const saltBytes = saltHex
-          ? new Uint8Array(saltHex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)))
-          : new Uint8Array(16);
+        // Persist employee profile metadata
+        try {
+          if (user) {
+            await setDoc(
+              doc(db, 'users', user.uid),
+              {
+                uid: user.uid,
+                email: authenticatedEmail,
+                corporateEmail: cleanCorpEmail,
+                hasPassphrase: true,
+              },
+              { merge: true }
+            );
+          }
+        } catch {}
+
+        const saltBytes = new Uint8Array(saltHex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
         const encryptionKey = await deriveKeyFromPassphrase(passphrase, saltBytes);
 
-        setSuccessMessage('Verschlüsselung verifiziert. QM-Tool Arbeitsbereich wird geladen...');
+        setSuccessMessage('Betriebliches Konto & Unternehmens-Passphrase verifiziert. Arbeitsbereich wird geladen...');
         setTimeout(() => {
-          onLoginSuccess(authenticatedEmail, idToken, encryptionKey);
+          onLoginSuccess(cleanCorpEmail, idToken, encryptionKey);
         }, 300);
       }
     } catch (err: any) {
@@ -326,9 +370,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setStage('google_login');
     setAuthenticatedEmail('');
     setIdToken('');
+    setCorporateEmailInput('');
     setPassphrase('');
     setConfirmPassphrase('');
     setFailedAttempts(0);
+    setIsResettingPassphrase(false);
     setErrorMessage(null);
     setSuccessMessage(null);
   };
@@ -345,7 +391,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <div>
               <h2 className="text-xl font-bold tracking-tight">QM-Tool Nachhaltigkeit – Sicherheitsportal</h2>
               <p className="text-xs text-slate-300">
-                2-Stufen-Sicherheit: Google-Authentifizierung & In-App Unternehmens-Verschlüsselung
+                Mehrstufige Sicherheit: Google-Login, freigeschaltete Betriebs-Mail &amp; Unternehmens-Passphrase
               </p>
             </div>
           </div>
@@ -355,10 +401,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <span>
                 {stage === 'google_login'
                   ? 'Stufe 1: Anmeldung mit Google-Konto'
-                  : 'Stufe 2: In-App Entschlüsselungsmaske (3-Versuche-Limit)'}
+                  : 'Stufe 2: Betriebliche E-Mail-Prüfung & Tresor-Passphrase'}
               </span>
             </div>
-            <span className="text-emerald-400 font-mono text-[11px] font-bold">QM-Tool v2.0</span>
+            <span className="text-emerald-400 font-mono text-[11px] font-bold">QM-Tool v2.1</span>
           </div>
         </div>
 
@@ -389,11 +435,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <div className="text-center space-y-2">
                 <h3 className="text-lg font-bold text-slate-900">Willkommen im QM-Tool Nachhaltigkeit</h3>
                 <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-                  Bitte melden Sie sich mit Ihrem Google-Konto an, um Zugriff auf das Audit-Portal zur Konformitätsprüfung nach DGNB, QNG und BNB zu erhalten.
+                  Bitte melden Sie sich mit Ihrem Google-Konto an. Im nächsten Schritt erfolgt die Verifikation Ihrer vom Administrator freigeschalteten betrieblichen E-Mail-Adresse sowie der Unternehmens-Passphrase.
                 </p>
               </div>
 
-              {/* Prominent Google Sign-In Button */}
               <button
                 type="button"
                 onClick={handleGoogleAuth}
@@ -433,118 +478,150 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 space-y-1.5">
                 <div className="flex items-center space-x-2 font-semibold text-slate-800">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Sicherer 1-Klick Login</span>
+                  <span>Dreifacher Schutz vor unbefugtem Zugriff</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-slate-500">
-                  Ihre Anmeldedaten werden direkt über Google OAuth verifiziert. Nach erfolgreichem Login werden Sie zur Eingabe Ihrer Unternehmens-Verschlüsselungsphrase weitergeleitet.
+                  Selbst bei Bekanntwerden der Unternehmens-Passphrase erhalten nur Mitarbeiter Zugang, deren betriebliche E-Mail-Adresse zuvor vom Administrator als Konto hinterlegt wurde.
                 </p>
               </div>
             </div>
           )}
 
-          {/* STAGE 2: IN-APP PASSPHRASE SECURITY MASK */}
+          {/* STAGE 2: IN-APP PASSPHRASE & CORPORATE EMAIL SECURITY MASK */}
           {stage === 'passphrase_mask' && (
-            <div>
-              {/* Authenticated Account Info Badge */}
-              <div className="mb-5 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div className="space-y-6">
+              {/* Authenticated Google Account Info Badge */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="flex items-center justify-between text-xs text-slate-600">
-                  <span className="font-semibold text-slate-900">Angemeldet als Google-Nutzer:</span>
-                  <span className="font-mono bg-white px-2.5 py-1 rounded border border-slate-200 text-slate-800 font-medium">
-                    {authenticatedEmail}
-                  </span>
-                </div>
-                <div className="mt-2 text-[11px] text-slate-500 flex items-center space-x-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Google Authentication erfolgreich.</span>
+                  <span className="font-semibold text-slate-900">Google-Sitzung:</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-mono bg-white px-2.5 py-1 rounded border border-slate-200 text-slate-800 font-medium">
+                      {authenticatedEmail}
+                    </span>
+                    {isAdmin && (
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold uppercase">
+                        Admin
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {!hasPassphraseConfigured ? (
-                /* Sub-Mode 2A: First-Time Setup of Encryption Passphrase */
-                <form onSubmit={handlePassphraseSubmit} className="space-y-4">
-                  <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start space-x-2.5">
-                    <HelpCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold">Ersteinrichtung der Verschlüsselungsphrase</p>
-                      <p className="mt-0.5 leading-relaxed text-blue-800">
-                        Dies ist Ihr erster Login. Legen Sie hier Ihre persönliche Verschlüsselungsphrase fest. Diese Phrase schützt alle vertraulichen Auditberichte und wird bei jedem neuen Aufruf abgefragt.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                      Neue Verschlüsselungsphrase wählen
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <KeyRound className="w-4 h-4" />
+              {!hasPassphraseConfigured || isResettingPassphrase ? (
+                /* Sub-Mode 2A: Admin-Only Setup / Reset of Company Encryption Passphrase */
+                isAdmin ? (
+                  <form onSubmit={handlePassphraseSubmit} className="space-y-4">
+                    <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start space-x-2.5">
+                      <HelpCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">
+                          {isResettingPassphrase
+                            ? 'Unternehmens-Passphrase neu festlegen (Administrator)'
+                            : 'Erstmalige Einrichtung der Unternehmens-Passphrase (Administrator)'}
+                        </p>
+                        <p className="mt-0.5 leading-relaxed text-blue-800">
+                          Legen Sie als Administrator die zentrale Unternehmens-Passphrase fest. In Firebase wird nur ein verschlüsselter Prüfblock (Zero-Knowledge) abgelegt. Geben Sie diese Phrase intern an freigeschaltete Mitarbeiter weiter.
+                        </p>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                        Neue Unternehmens-Passphrase wählen
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <KeyRound className="w-4 h-4" />
+                        </div>
+                        <input
+                          type={showPassphrase ? 'text' : 'password'}
+                          required
+                          value={passphrase}
+                          onChange={(e) => setPassphrase(e.target.value)}
+                          placeholder="Mindestens 8 Zeichen"
+                          className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassphrase(!showPassphrase)}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          {showPassphrase ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                        Unternehmens-Passphrase bestätigen
+                      </label>
                       <input
                         type={showPassphrase ? 'text' : 'password'}
                         required
-                        value={passphrase}
-                        onChange={(e) => setPassphrase(e.target.value)}
-                        placeholder="Mindestens 8 Zeichen (z.B. QM-Pass-2024)"
-                        className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+                        value={confirmPassphrase}
+                        onChange={(e) => setConfirmPassphrase(e.target.value)}
+                        placeholder="Passphrase exakt wiederholen"
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassphrase(!showPassphrase)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        {showPassphrase ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Empfohlener Standard-Schlüssel: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code>
-                    </p>
-                  </div>
 
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                      Verschlüsselungsphrase bestätigen
-                    </label>
-                    <input
-                      type={showPassphrase ? 'text' : 'password'}
-                      required
-                      value={confirmPassphrase}
-                      onChange={(e) => setConfirmPassphrase(e.target.value)}
-                      placeholder="Phrase exakt wiederholen"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
-                    />
-                  </div>
-
-                  <div className="pt-2 flex space-x-3">
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-sm cursor-pointer"
-                    >
-                      {isLoading ? (
-                        <span>Initialisiere Tresor...</span>
+                    <div className="pt-2 flex space-x-3">
+                      <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-sm cursor-pointer"
+                      >
+                        {isLoading ? (
+                          <span>Initialisiere Tresor...</span>
+                        ) : (
+                          <>
+                            <span>Passphrase verschlüsselt in Firebase hinterlegen</span>
+                            <ArrowRight className="w-4 h-4" />
+                          </>
+                        )}
+                      </button>
+                      {isResettingPassphrase ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsResettingPassphrase(false)}
+                          className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg cursor-pointer"
+                        >
+                          Zurück
+                        </button>
                       ) : (
-                        <>
-                          <span>Phrase speichern & Tool öffnen</span>
-                          <ArrowRight className="w-4 h-4" />
-                        </>
+                        <button
+                          type="button"
+                          onClick={handleSignOut}
+                          className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg cursor-pointer"
+                        >
+                          Abbrechen
+                        </button>
                       )}
-                    </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-3">
+                    <p className="font-bold">Unternehmens-Tresor noch nicht eingerichtet</p>
+                    <p className="leading-relaxed">
+                      Nur der Administrator kann beim ersten Login die Unternehmens-Passphrase festlegen und Mitarbeiter-Konten freischalten. Bitte wenden Sie sich an Ihren Administrator.
+                    </p>
                     <button
                       type="button"
                       onClick={handleSignOut}
-                      className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg cursor-pointer"
+                      className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 border border-amber-300 rounded-lg font-semibold cursor-pointer"
                     >
-                      Abbrechen
+                      Abmelden
                     </button>
                   </div>
-                </form>
+                )
               ) : (
-                /* Sub-Mode 2B: Subsequent Logins – Passphrase Unlock Mask with 3-Attempt Counter */
+                /* Sub-Mode 2B: Unlock Mask requiring Corporate Email + Company Passphrase */
                 <form onSubmit={handlePassphraseSubmit} className="space-y-4">
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-slate-900">Sicherheitsprüfung der Unternehmensdaten</span>
+                      <span className="font-bold text-slate-900">
+                        Verifikation: Betriebliches Konto &amp; Unternehmens-Passphrase
+                      </span>
                       <span
                         className={`text-[11px] font-bold px-2 py-0.5 rounded ${
                           failedAttempts === 0
@@ -558,13 +635,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </span>
                     </div>
                     <p className="text-slate-600 leading-relaxed">
-                      Geben Sie Ihre festgelegte Verschlüsselungsphrase ein, um die vertraulichen Prüfdaten zu entschlüsseln. Nach 3 Fehlversuchen werden Sie automatisch abgemeldet.
+                      Geben Sie Ihre vom Administrator freigeschaltete betriebliche E-Mail-Adresse sowie die Unternehmens-Passphrase ein, um den AES-256-Datentresor zu entsperren.
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                      Verschlüsselungsphrase
+                      Betriebliche E-Mail-Adresse (freigeschaltetes Mitarbeiter-Konto)
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <input
+                        type="email"
+                        required
+                        value={corporateEmailInput}
+                        onChange={(e) => setCorporateEmailInput(e.target.value)}
+                        placeholder="z.B. vorname.nachname@kaubit.de"
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                      Unternehmens-Passphrase
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -575,7 +671,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         required
                         value={passphrase}
                         onChange={(e) => setPassphrase(e.target.value)}
-                        placeholder="Ihre persönliche Verschlüsselungsphrase"
+                        placeholder="Interne Unternehmens-Passphrase eingeben"
                         className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
                       />
                       <button
@@ -587,16 +683,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         {showPassphrase ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <div className="flex items-center justify-between mt-1.5 text-[11px] text-slate-500">
-                      <span>Standard-Schlüssel für Testkonto: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-semibold">QM-Tool-2024</code></span>
-                      <button
-                        type="button"
-                        onClick={() => setPassphrase('QM-Tool-2024')}
-                        className="text-emerald-600 hover:text-emerald-700 underline font-semibold cursor-pointer"
-                      >
-                        Einfügen
-                      </button>
-                    </div>
                   </div>
 
                   <div className="pt-2 flex space-x-3">
@@ -606,10 +692,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       className="flex-1 py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-sm hover:shadow transition-all disabled:opacity-60 cursor-pointer"
                     >
                       {isLoading ? (
-                        <span>Entschlüssele Daten...</span>
+                        <span>Prüfe Konto &amp; entschlüssele Tresor...</span>
                       ) : (
                         <>
-                          <span>Entschlüsseln & Nutzeroberfläche öffnen</span>
+                          <span>Verifizieren &amp; Arbeitsbereich öffnen</span>
                           <ArrowRight className="w-4 h-4" />
                         </>
                       )}
@@ -624,6 +710,87 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </button>
                   </div>
                 </form>
+              )}
+
+              {/* ADMIN-ONLY EMPLOYEE ACCOUNT & VAULT MANAGEMENT PANEL */}
+              {isAdmin && (
+                <div className="pt-4 border-t border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Users className="w-4 h-4 text-emerald-600" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                        Admin-Verwaltung: Freigeschaltete Mitarbeiter-Konten ({authorizedEmails.length})
+                      </h4>
+                    </div>
+                    {hasPassphraseConfigured && !isResettingPassphrase && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPassphrase('');
+                          setConfirmPassphrase('');
+                          setIsResettingPassphrase(true);
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                      >
+                        Passphrase ändern
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Legen Sie hier über die betriebliche E-Mail-Adresse ein Konto für Mitarbeiter an. Nur hier gelistete E-Mail-Adressen können sich zusammen mit der Unternehmens-Passphrase anmelden.
+                  </p>
+
+                  <form onSubmit={handleAddEmployeeAccount} className="flex space-x-2">
+                    <input
+                      type="email"
+                      value={newEmployeeEmail}
+                      onChange={(e) => setNewEmployeeEmail(e.target.value)}
+                      placeholder="Neue betriebliche E-Mail (z.B. mitarbeiter@kaubit.de)"
+                      className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSavingEmployee || !newEmployeeEmail.trim()}
+                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Konto anlegen</span>
+                    </button>
+                  </form>
+
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                    {authorizedEmails.map((emailItem) => {
+                      const isItemAdmin = isAdminEmail(emailItem);
+                      return (
+                        <div
+                          key={emailItem}
+                          className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs"
+                        >
+                          <div className="flex items-center space-x-2 truncate">
+                            <span className="font-mono text-slate-800 truncate">{emailItem}</span>
+                            {isItemAdmin && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                          {!isItemAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEmployeeAccount(emailItem)}
+                              disabled={isSavingEmployee}
+                              className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer"
+                              title="Mitarbeiter-Konto entfernen"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
             </div>
           )}

@@ -1,5 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { CriteriaRow, ExtractedDocumentData, ProductEvaluationResult, SustainabilityStandard } from '../types/dgnb';
+import {
+  ConfirmedEvidence,
+  CriteriaRow,
+  ExtractedDocumentData,
+  ProductEvaluationResult,
+  SustainabilityStandard,
+} from '../types/dgnb';
 import { safeFetchJson } from '../utils/safeFetch';
 import { ConfirmExtractedDataModal } from './ConfirmExtractedDataModal';
 import {
@@ -28,14 +34,19 @@ import {
   getAllSavedEvaluationsFromDb,
   deleteProductEvaluationFromDb,
   normalizeProductKey,
+  decodeStoredPayload,
+  revalidateCachedResult,
+  getPrimaryCriteriaRowNr,
   StoredProductRecord,
 } from '../utils/productDbService';
+import { auth } from '../firebase/config';
 
 interface Step2ProductUploadProps {
   standards: SustainabilityStandard[];
   onAnalysisComplete: (result: ProductEvaluationResult) => void;
   projectName: string;
   userEmail: string;
+  encryptionKey?: CryptoKey | null;
 }
 
 export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
@@ -43,13 +54,20 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   onAnalysisComplete,
   projectName,
   userEmail,
+  encryptionKey,
 }) => {
   // Form state - starts clean without pre-filled mock/demo data
   const [productName, setProductName] = useState('');
   const [manufacturer, setManufacturer] = useState('');
-  const [selectedRowNr, setSelectedRowNr] = useState('1');
+  const [selectedRowNr, setSelectedRowNr] = useState('2');
   const [vocTestDate, setVocTestDate] = useState('');
   const [hasBauteilekatalog, setHasBauteilekatalog] = useState(true);
+
+  // Confirmed structured fields & evidence from modal
+  const [confirmedVocContent, setConfirmedVocContent] = useState('');
+  const [confirmedSvhcStatus, setConfirmedSvhcStatus] = useState('');
+  const [confirmedCertificates, setConfirmedCertificates] = useState<string[]>([]);
+  const [confirmedEvidence, setConfirmedEvidence] = useState<ConfirmedEvidence>({});
 
   // Selective Standards Toggle (DGNB, QNG, BNB active by default)
   const [selectedStandards, setSelectedStandards] = useState<string[]>(['DGNB', 'QNG', 'BNB']);
@@ -75,6 +93,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   // Database Caching & Library states
   const [dbHitResult, setDbHitResult] = useState<ProductEvaluationResult | null>(null);
   const [dbHitSource, setDbHitSource] = useState<'firestore' | 'local' | null>(null);
+  const [dbHitWarnings, setDbHitWarnings] = useState<string[]>([]);
   const [isCheckingDb, setIsCheckingDb] = useState(false);
   const [savedProducts, setSavedProducts] = useState<StoredProductRecord[]>([]);
   const [showDbLibrary, setShowDbLibrary] = useState(false);
@@ -91,17 +110,20 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     if (!name || name.trim().length < 2) {
       setDbHitResult(null);
       setDbHitSource(null);
+      setDbHitWarnings([]);
       return;
     }
     setIsCheckingDb(true);
     try {
-      const match = await findProductEvaluationInDb(name, mfr);
+      const match = await findProductEvaluationInDb(name, mfr, encryptionKey, selectedRowNr);
       if (match) {
         setDbHitResult(match.result);
         setDbHitSource(match.source);
+        setDbHitWarnings(match.warnings);
       } else {
         setDbHitResult(null);
         setDbHitSource(null);
+        setDbHitWarnings([]);
       }
     } catch (e) {
       console.warn('DB check error:', e);
@@ -198,8 +220,17 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       return;
     }
 
-    if (file.size > 35 * 1024 * 1024) {
-      setErrorMessage('Die Datei ist zu groß (maximal 35 MB zulässig).');
+    const isLocalhost =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const maxBytes = isLocalhost ? 35 * 1024 * 1024 : 3.2 * 1024 * 1024;
+
+    if (file.size > maxBytes) {
+      setErrorMessage(
+        isLocalhost
+          ? 'Die Datei ist zu groß (maximal 35 MB zulässig).'
+          : `Die PDF-Datei (${(file.size / (1024 * 1024)).toFixed(1)} MB) überschreitet das Vercel-Serverless-Limit von ca. 3,2 MB. Bitte komprimieren Sie das PDF oder extrahieren Sie die relevanten Seiten.`
+      );
       return;
     }
 
@@ -233,37 +264,50 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         setPendingExtraction(res.data.extracted);
         setIsModalOpen(true);
       } else {
-        const fallbackExtracted: ExtractedDocumentData = {
+        const errMsg =
+          res.data?.message ||
+          res.error ||
+          'KI-Dokumentenscan war nicht verfügbar. Bitte tragen Sie die Produktkennwerte manuell im Bestätigungsdialog ein.';
+        setErrorMessage(errMsg);
+        const manualFallback: ExtractedDocumentData = {
           documentType,
           filename: file.name,
           productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-          manufacturer: 'Hersteller im PDF verifizieren',
-          suggestedCriteriaNr: '1',
-          vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
-          svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+          manufacturer: '',
+          suggestedCriteriaNr: selectedRowNr || '2',
+          vocContent: '',
+          vocTestDate: '',
+          svhcStatus: '',
           certificates: [],
           hasBauteilekatalog: true,
-          summarySnippet: `Dokument "${file.name}" geladen. Bitte überprüfen Sie die Werte im Bestätigungsdialog und tragen Sie fehlende Parameter manuell ein.`,
+          summarySnippet: '',
           fieldQuotes: [],
+          warnings: [errMsg],
         };
-        setPendingExtraction(fallbackExtracted);
+        setPendingExtraction(manualFallback);
         setIsModalOpen(true);
       }
     } catch (err: any) {
-      const fallbackExtracted: ExtractedDocumentData = {
+      const errMsg =
+        'Fehler beim Scannen des PDFs: ' +
+        (err?.message || 'Bitte tragen Sie die Kennwerte manuell ein.');
+      setErrorMessage(errMsg);
+      const manualFallback: ExtractedDocumentData = {
         documentType,
         filename: file.name,
         productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-        manufacturer: 'Hersteller im PDF verifizieren',
-        suggestedCriteriaNr: '1',
-        vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
-        svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+        manufacturer: '',
+        suggestedCriteriaNr: selectedRowNr || '2',
+        vocContent: '',
+        vocTestDate: '',
+        svhcStatus: '',
         certificates: [],
         hasBauteilekatalog: true,
-        summarySnippet: `Dokument "${file.name}" bereitgestellt. Bitte ergänzen Sie fehlende Parameter im Bestätigungsdialog.`,
+        summarySnippet: '',
         fieldQuotes: [],
+        warnings: [errMsg],
       };
-      setPendingExtraction(fallbackExtracted);
+      setPendingExtraction(manualFallback);
       setIsModalOpen(true);
     } finally {
       setIsScanningSdb(false);
@@ -282,24 +326,70 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     hasBauteilekatalog: boolean;
     summarySnippet: string;
     documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+    evidence: ConfirmedEvidence;
   }) => {
-    // Populate form fields with user-confirmed values
-    if (confirmed.productName) setProductName(confirmed.productName);
-    if (confirmed.manufacturer) setManufacturer(confirmed.manufacturer);
-    if (confirmed.criteriaRowNr) setSelectedRowNr(confirmed.criteriaRowNr);
+    // Check for product identity mismatch if a previous document already set productName
+    const existingName = productName.trim().toLowerCase();
+    const incomingName = confirmed.productName.trim().toLowerCase();
+    const hasMismatch =
+      existingName.length > 2 &&
+      incomingName.length > 2 &&
+      !existingName.includes(incomingName) &&
+      !incomingName.includes(existingName);
+
+    if (hasMismatch) {
+      setErrorMessage(
+        `Achtung (Produktabweichung): Das hochgeladene Dokument nennt „${confirmed.productName}“, während im Formular bereits „${productName}“ eingetragen ist. Der bestehende Produktname wurde beibehalten – bitte prüfen Sie, ob beide Dokumente zum selben Produkt gehören!`
+      );
+    } else if (confirmed.productName) {
+      setProductName(confirmed.productName);
+    }
+
+    if (!manufacturer.trim() && confirmed.manufacturer) {
+      setManufacturer(confirmed.manufacturer);
+    } else if (!hasMismatch && confirmed.manufacturer) {
+      setManufacturer(confirmed.manufacturer);
+    }
+
+    if (!sdbText && !testReportText && confirmed.criteriaRowNr) {
+      setSelectedRowNr(confirmed.criteriaRowNr);
+    } else if (!hasMismatch && confirmed.criteriaRowNr && confirmed.documentType === 'sdb') {
+      setSelectedRowNr(confirmed.criteriaRowNr);
+    }
+
     if (confirmed.vocTestDate) setVocTestDate(confirmed.vocTestDate);
+    if (confirmed.vocContent) setConfirmedVocContent(confirmed.vocContent);
+    if (confirmed.svhcStatus) setConfirmedSvhcStatus(confirmed.svhcStatus);
+    if (confirmed.certificates.length > 0) {
+      setConfirmedCertificates((prev) =>
+        Array.from(new Set([...prev, ...confirmed.certificates]))
+      );
+    }
+
+    setConfirmedEvidence((prev) => {
+      const next: ConfirmedEvidence = { ...prev };
+      const keys: (keyof ConfirmedEvidence)[] = ['voc', 'testDate', 'svhc', 'label'];
+      for (const k of keys) {
+        const inc = confirmed.evidence[k];
+        if (!inc) continue;
+        if (!next[k] || next[k]?.source === 'missing' || inc.source !== 'missing') {
+          next[k] = inc;
+        }
+      }
+      return next;
+    });
+
     setHasBauteilekatalog(confirmed.hasBauteilekatalog);
 
     if (confirmed.documentType === 'sdb') {
       const formattedSdb = [
         `PRODUKT: ${confirmed.productName} (${confirmed.manufacturer})`,
-        `VOC-GEHALT: ${confirmed.vocContent}`,
+        confirmed.vocContent ? `VOC-GEHALT: ${confirmed.vocContent}` : '',
         confirmed.vocTestDate ? `PRÜFDATUM (VOC): ${confirmed.vocTestDate}` : '',
-        `REACH SVHC: ${confirmed.svhcStatus}`,
+        confirmed.svhcStatus ? `REACH SVHC: ${confirmed.svhcStatus}` : '',
         confirmed.certificates.length > 0 ? `ZERTIFIKATE: ${confirmed.certificates.join(', ')}` : '',
         '',
-        `AUSZUG SICHERHEITSDATENBLATT:`,
-        confirmed.summarySnippet,
+        confirmed.summarySnippet ? `WÖRTLICHE PDF-TEXTAUSZÜGE (SDB):\n${confirmed.summarySnippet}` : '',
       ]
         .filter(Boolean)
         .join('\n');
@@ -308,12 +398,11 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       const formattedReport = [
         `PRÜFBERICHT / ZERTIFIKATE:`,
         confirmed.certificates.length > 0 ? `NACHGEWIESENE ZEICHEN: ${confirmed.certificates.join(' · ')}` : '',
-        `VOC-MESSUNG: ${confirmed.vocContent}`,
+        confirmed.vocContent ? `VOC-MESSUNG: ${confirmed.vocContent}` : '',
         confirmed.vocTestDate ? `PRÜFDATUM / MESSUNG: ${confirmed.vocTestDate}` : '',
-        `SCHADSTOFF-BEWERTUNG: ${confirmed.svhcStatus}`,
+        confirmed.svhcStatus ? `SCHADSTOFF-BEWERTUNG: ${confirmed.svhcStatus}` : '',
         '',
-        `PRÜFSTELLEN-AUSZUG:`,
-        confirmed.summarySnippet,
+        confirmed.summarySnippet ? `WÖRTLICHE PDF-TEXTAUSZÜGE (PRÜFBERICHT):\n${confirmed.summarySnippet}` : '',
       ]
         .filter(Boolean)
         .join('\n');
@@ -321,14 +410,14 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     }
 
     setConfirmationNotice(
-      `Relevante Daten aus "${pendingExtraction?.filename || 'PDF'}" wurden von Ihnen erfolgreich geprüft und übernommen.`
+      `Relevante Daten aus "${pendingExtraction?.filename || 'PDF'}" wurden geprüft und übernommen.`
     );
     setIsModalOpen(false);
     setPendingExtraction(null);
 
-    // Auto-check DB if product already exists in database
-    if (confirmed.productName) {
-      checkProductInDatabase(confirmed.productName, confirmed.manufacturer);
+    const lookupName = hasMismatch ? productName : confirmed.productName || productName;
+    if (lookupName) {
+      checkProductInDatabase(lookupName, confirmed.manufacturer || manufacturer);
     }
   };
 
@@ -383,6 +472,13 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           userEmail: userEmail || 'auditor@bau-qm.org',
           selectedStandardCodes: selectedStandards,
           standards: activeStandardsPayload,
+          structuredInput: {
+            vocContent: confirmedVocContent || undefined,
+            vocTestDate: vocTestDate || undefined,
+            svhcStatus: confirmedSvhcStatus || undefined,
+            certificates: confirmedCertificates.length > 0 ? confirmedCertificates : undefined,
+            evidence: confirmedEvidence,
+          },
         }),
       });
 
@@ -390,8 +486,13 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         throw new Error(res.error || res.data?.message || 'Analysefehler bei der Konformitätsprüfung');
       }
 
-      // Save result to Firestore & LocalStorage for zero-token future lookup
-      await saveProductEvaluationToDb(res.data.result, 'auditor-user', userEmail);
+      // Save result to Firestore & LocalStorage (encrypted with company AES-256-GCM key) for zero-token future lookup
+      await saveProductEvaluationToDb(
+        res.data.result,
+        auth.currentUser?.uid,
+        userEmail,
+        encryptionKey
+      );
       const updatedList = await getAllSavedEvaluationsFromDb();
       setSavedProducts(updatedList);
 
@@ -454,11 +555,6 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {savedProducts.map((rec) => {
-                let parsedResult: ProductEvaluationResult | null = null;
-                try {
-                  parsedResult = JSON.parse(rec.encryptedPayload);
-                } catch (e) {}
-
                 return (
                   <div
                     key={rec.id}
@@ -467,7 +563,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                     <div>
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                          QS {rec.qualityLevel} (DGNB)
+                          QS {rec.qualityLevel} (DGNB){rec.criteriaRowNr ? ` · Zeile ${rec.criteriaRowNr}` : ''}
                         </span>
                         <span className="text-[10px] text-slate-400 flex items-center space-x-1">
                           <Clock className="w-3 h-3" />
@@ -483,10 +579,16 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                     <div className="flex items-center space-x-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => {
-                          if (parsedResult) {
-                            onAnalysisComplete(parsedResult);
+                        onClick={async () => {
+                          const decoded = await decodeStoredPayload(rec.encryptedPayload, encryptionKey);
+                          if (decoded) {
+                            const revalidated = revalidateCachedResult(decoded, rec.schemaVersion);
+                            onAnalysisComplete(revalidated.result);
                             setShowDbLibrary(false);
+                          } else {
+                            setErrorMessage(
+                              'Dieser Datenbank-Eintrag konnte mit der aktuellen Unternehmens-Passphrase nicht entschlüsselt werden.'
+                            );
                           }
                         }}
                         className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center space-x-1 cursor-pointer transition-colors"
@@ -529,8 +631,22 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                 Geprüftes Produkt: "{dbHitResult.productName}" ({dbHitResult.manufacturer})
               </h3>
               <p className="text-xs text-slate-300 mt-1">
-                Dieses Produkt wurde bereits nach <strong>{dbHitResult.selectedStandardCodes?.join(', ')}</strong> bewertet. Sie können die fertige Bewertung sofort laden oder löschen, um die Bauteilgruppe neu zu wählen.
+                Dieses Produkt wurde bereits nach <strong>{dbHitResult.selectedStandardCodes?.join(', ')}</strong> (Zeile Nr. {getPrimaryCriteriaRowNr(dbHitResult)}) bewertet. Sie können die fertige Bewertung sofort laden oder löschen, um die Bauteilgruppe neu zu wählen.
               </p>
+              {getPrimaryCriteriaRowNr(dbHitResult) !== selectedRowNr && (
+                <p className="text-xs text-amber-300 font-semibold mt-1.5">
+                  ⚠️ Hinweis: Die gespeicherte Bewertung wurde für Bauteilgruppe Nr. {getPrimaryCriteriaRowNr(dbHitResult)} erstellt (aktuell im Formular gewählt: Nr. {selectedRowNr}).
+                </p>
+              )}
+              {dbHitWarnings.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {dbHitWarnings.map((w, idx) => (
+                    <p key={idx} className="text-xs text-amber-300 font-semibold">
+                      ⚠️ {w}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

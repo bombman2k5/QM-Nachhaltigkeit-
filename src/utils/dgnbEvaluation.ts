@@ -1,120 +1,110 @@
 import { ParameterEvaluation, ComplianceEvaluation, QualityLevel } from '../types/dgnb';
-
-/**
- * Default core authorized auditors always permitted to access the application.
- */
-export const CORE_ALLOWED_EMAILS = [
-  'brian.lackmann@kaubit.de',
-  'brianlackmann@gmail.com',
-  'admin@dgnb-qm.de',
-  'auditor@bau-qm.org',
-  'auditor@kaubit.de',
-];
-
-/**
- * Checks whether an email address is authorized according to the whitelist or corporate domain.
- */
-export function isEmailAllowed(email: string, allowedEmails: string[] = []): boolean {
-  if (!email || typeof email !== 'string') return false;
-  const normalized = email.trim().toLowerCase();
-  if (!normalized || !normalized.includes('@')) return false;
-
-  // Always authorize core auditor accounts
-  if (CORE_ALLOWED_EMAILS.some((core) => core.toLowerCase() === normalized)) {
-    return true;
-  }
-
-  // Authorize Kaubit corporate domain
-  if (normalized.endsWith('@kaubit.de')) {
-    return true;
-  }
-
-  // Check dynamically provided whitelist (from config or ALLOWED_EMAILS)
-  return allowedEmails.some((allowed) => {
-    if (!allowed || typeof allowed !== 'string') return false;
-    const normAllowed = allowed.trim().toLowerCase();
-    if (!normAllowed) return false;
-    
-    // Domain wildcard check (e.g. "@kaubit.de" or "*@kaubit.de")
-    if (normAllowed.startsWith('@') || normAllowed.startsWith('*@')) {
-      const domain = normAllowed.replace(/^\*?@/, '');
-      return normalized.endsWith(`@${domain}`);
-    }
-
-    return normAllowed === normalized;
-  });
-}
+import { parseDate } from './parameterRules';
 
 /**
  * Evaluates the age of a VOC test report / certificate against institute requirements (DGNB, AgBB, EMICODE, QNG, BNB).
  * Standard Institute Rules:
  * - <= 5 years old: Fully valid (Quality Level 4 / Pass)
  * - 5 to 10 years old: Warning / Demoted (Requires written manufacturer confirmation of unchanged formulation)
- * - > 10 years old or invalid: Expired KO (Quality Level 1 / Fail)
+ * - > 10 years old or invalid / future date: Expired KO (Quality Level 1 / Fail)
  * - Missing date: Warning / Demoted (Quality Level 2)
  */
 export function evaluateTestDateAge(
   dateStr?: string,
-  currentYear: number = new Date().getFullYear()
+  referenceDate: number | Date = new Date()
 ): {
   ageYears: number | null;
   achievedLevel: QualityLevel;
   status: 'pass' | 'warning' | 'fail';
   explanation: string;
+  needsManualReview?: boolean;
 } {
-  if (!dateStr || !dateStr.trim() || dateStr.toLowerCase().includes('kein') || dateStr.toLowerCase().includes('fehlt')) {
+  if (!dateStr || !dateStr.trim() || /\b(kein|keine|fehlt|unbekannt|nicht angegeben)\b/i.test(dateStr)) {
     return {
       ageYears: null,
       achievedLevel: 2,
       status: 'warning',
       explanation:
         'Kein Prüfberichtsdatum für die VOC-Emissionsmessung angegeben. Gemäß Institutsvorgaben (DGNB/AgBB) dürfen Prüfberichte maximal 5 Jahre alt sein (bzw. max. 10 Jahre mit Rezepturbestätigung).',
+      needsManualReview: true,
     };
   }
 
-  // Find 4-digit year pattern (e.g. 2023 in "15.05.2023" or "2023-04-10" or "Mai 2021")
-  const yearMatch = dateStr.match(/\b(19\d\d|20\d\d)\b/);
-  if (!yearMatch) {
+  const parsed = parseDate(dateStr);
+  if (!parsed) {
     return {
       ageYears: null,
       achievedLevel: 2,
       status: 'warning',
-      explanation: `Das übergebene Prüfdatum "${dateStr}" konnte keinem Jahr zugeordnet werden. DGNB/AgBB fordern einen gültigen Nachweis ≤ 5 Jahre.`,
+      explanation: `Das übergebene Prüfdatum "${dateStr}" konnte keinem gültigen Datum zugeordnet werden (Berichtsnummern und Normjahre werden ignoriert). DGNB/AgBB fordern einen gültigen Nachweis ≤ 5 Jahre.`,
+      needsManualReview: true,
     };
   }
 
-  const testYear = parseInt(yearMatch[1], 10);
-  const ageYears = Math.max(0, currentYear - testYear);
+  const refDate =
+    typeof referenceDate === 'number'
+      ? new Date(Date.UTC(referenceDate, 11, 31))
+      : referenceDate;
+  const refYear = typeof referenceDate === 'number' ? referenceDate : referenceDate.getUTCFullYear();
+  const testYear = parsed.date.getUTCFullYear();
+
+  // Future date check
+  if (
+    testYear > refYear ||
+    (typeof referenceDate !== 'number' && parsed.precision !== 'year' && parsed.date.getTime() > refDate.getTime() + 86400000)
+  ) {
+    return {
+      ageYears: null,
+      achievedLevel: 1,
+      status: 'fail',
+      explanation: `Ungültiges Prüfdatum "${dateStr}": Das Datum liegt in der Zukunft und kann nicht als gültiger Nachweis gewertet werden.`,
+      needsManualReview: true,
+    };
+  }
+
+  let ageYears: number;
+  if (typeof referenceDate === 'number' || parsed.precision === 'year') {
+    ageYears = Math.max(0, refYear - testYear);
+  } else {
+    const diffMs = refDate.getTime() - parsed.date.getTime();
+    ageYears = Math.max(0, Math.round((diffMs / (365.25 * 24 * 3600 * 1000)) * 10) / 10);
+  }
+
+  const ambiguityHint = parsed.ambiguous
+    ? ' Hinweis: Im Text wurden mehrere Jahreszahlen gefunden – bitte Prüfdatum manuell verifizieren.'
+    : '';
 
   if (ageYears <= 5) {
     return {
       ageYears,
       achievedLevel: 4,
-      status: 'pass',
-      explanation: `Gültiger Prüfbericht: Datum "${dateStr}" (vor ca. ${ageYears} Jahr(en)). Erfüllt die DGNB/AgBB/EMICODE 5-Jahres-Frist ohne Einschränkung.`,
+      status: parsed.ambiguous ? 'warning' : 'pass',
+      explanation: `Gültiger Prüfbericht: Datum "${parsed.raw}" (Alter ca. ${ageYears} Jahr(e)). Erfüllt die DGNB/AgBB/EMICODE 5-Jahres-Frist ohne Einschränkung.${ambiguityHint}`,
+      needsManualReview: Boolean(parsed.ambiguous),
     };
   } else if (ageYears <= 10) {
     return {
       ageYears,
       achievedLevel: 2,
       status: 'warning',
-      explanation: `Warnung (Prüfbericht > 5 Jahre): Datum "${dateStr}" (vor ca. ${ageYears} Jahren). Laut DGNB/AgBB ist eine schriftliche Herstellerexplikation zur unveränderten Rezeptur erforderlich.`,
+      explanation: `Warnung (Prüfbericht > 5 Jahre): Datum "${parsed.raw}" (Alter ca. ${ageYears} Jahre). Laut DGNB/AgBB ist eine schriftliche Herstellererklärung zur unveränderten Rezeptur erforderlich.${ambiguityHint}`,
+      needsManualReview: true,
     };
   } else {
     return {
       ageYears,
       achievedLevel: 1,
       status: 'fail',
-      explanation: `K.O.-Kriterium (Prüfbericht abgelaufen): Datum "${dateStr}" (vor ca. ${ageYears} Jahren). Prüfberichte älter als 10 Jahre werden von den Instituten als veraltet und ungültig eingestuft.`,
+      explanation: `K.O.-Kriterium (Prüfbericht abgelaufen): Datum "${parsed.raw}" (Alter ca. ${ageYears} Jahre). Prüfberichte älter als 10 Jahre werden von den Instituten als veraltet und ungültig eingestuft.${ambiguityHint}`,
+      needsManualReview: Boolean(parsed.ambiguous),
     };
   }
 }
 
-
 /**
  * Evaluates product compliance based on the DGNB Schwachstellen-Prinzip (K.O.-Verfahren)
  * and the mandatory Bauteilekatalog requirement for Quality Levels 3 and 4.
- * 
+ *
  * Rules applied strictly:
  * 1. The overall quality level is governed by the single parameter that receives the lowest rating.
  * 2. If any parameter misses the requirement for a higher level, it is automatically demoted.
@@ -133,6 +123,7 @@ export function evaluateDgnbCompliance(
       bottleneckReason: 'Keine messbaren Prüfparameter übergeben.',
       userExplanation: 'Es konnten keine stofflichen Kennwerte aus den Dokumenten ermittelt werden.',
       evaluatedParameters: [],
+      isProvisional: true,
     };
   }
 
@@ -144,15 +135,27 @@ export function evaluateDgnbCompliance(
     }
   }
 
-  // Mark bottleneck parameters
+  // Mark bottleneck parameters and compute honest status
   const evaluatedParameters: ParameterEvaluation[] = parameters.map((p) => {
     const isBottleneck = p.achievedLevel === lowestParamLevel && lowestParamLevel < 4;
+    let status: 'pass' | 'warning' | 'fail';
+    if (p.achievedLevel >= 3) {
+      status = p.needsManualReview ? 'warning' : 'pass';
+    } else if (p.achievedLevel === 2) {
+      status = 'warning';
+    } else {
+      status = 'fail';
+    }
     return {
       ...p,
       isBottleneck,
-      status: p.achievedLevel >= 3 ? 'pass' : p.achievedLevel === 2 ? 'warning' : 'fail',
+      status,
     };
   });
+
+  const isProvisional = evaluatedParameters.some(
+    (p) => p.needsManualReview || p.evidence?.verification === 'unverified'
+  );
 
   const bottleneckParam = evaluatedParameters.find((p) => p.achievedLevel === lowestParamLevel) || null;
   const maxChemicalLevel = lowestParamLevel;
@@ -169,6 +172,9 @@ export function evaluateDgnbCompliance(
       'Herabstufung auf Qualitätsstufe 2: Stofflich erfüllt das Produkt zwar Stufe ' +
       lowestParamLevel +
       ', jedoch fehlt der gemäß DGNB ENV1.2 für Stufe 3 und 4 zwingend erforderliche materialökologische Bauteilekatalog nebst Baustellenkontroll-Nachweis.';
+  } else if (lowestParamLevel >= 3 && hasBauteilekatalog) {
+    bauteilekatalogImpactNote =
+      'Annahme für QS 3/4: Materialökologischer Bauteilekatalog bzw. QNG-ready-Nachweisführung wird vorausgesetzt (Standardeinstellung aktiv).';
   }
 
   // Generate simple, clear German user explanation
@@ -176,9 +182,12 @@ export function evaluateDgnbCompliance(
   let userExplanation = '';
 
   if (overallLevel === 4) {
-    bottleneckReason = 'Kein Engpass – Alle Anforderungen für QS 4 lückenlos erfüllt.';
-    userExplanation =
-      'Exzellentes Ergebnis: Das Produkt erfüllt in allen geprüften Parametern (VOC, SVHC, Umweltzeichen/Emissionsprüfung) sowie in der Nachweisführung die strengste DGNB-Qualitätsstufe 4. Es darf ohne Einschränkungen für Höchstbewertungen eingesetzt werden.';
+    bottleneckReason = isProvisional
+      ? 'Vorläufig QS 4 – mindestens ein Parameter erfordert noch eine manuelle Prüfung.'
+      : 'Kein Engpass – Alle Anforderungen für QS 4 lückenlos erfüllt.';
+    userExplanation = isProvisional
+      ? 'Vorläufiges Ergebnis: Rechnerisch werden die Anforderungen für Qualitätsstufe 4 erreicht, jedoch sind einzelne Belege oder Zusatzanforderungen als „bitte manuell prüfen“ markiert.'
+      : 'Exzellentes Ergebnis: Das Produkt erfüllt in allen geprüften Parametern (VOC, SVHC, Umweltzeichen/Emissionsprüfung) sowie in der Nachweisführung die strengste DGNB-Qualitätsstufe 4. Es darf ohne Einschränkungen für Höchstbewertungen eingesetzt werden.';
   } else if (isBauteilekatalogKO) {
     bottleneckReason = 'Fehlender materialökologischer Bauteilekatalog (K.O.-Kriterium für QS 3 und QS 4)';
     userExplanation =
@@ -204,5 +213,6 @@ export function evaluateDgnbCompliance(
     userExplanation,
     bauteilekatalogImpactNote,
     evaluatedParameters,
+    isProvisional,
   };
 }

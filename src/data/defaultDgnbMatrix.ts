@@ -21,7 +21,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung und/oder Prüfzertifikat (Gleichwertigkeit: DE-UZ 12a)',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte (Hinweis: werkseitige Beschichtungen)',
     qngRefNr: '6.1',
-    bnbRefNr: '19',
+    bnbRefNr: '3a',
   },
   {
     id: 'dgnb-z2',
@@ -38,7 +38,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung und/oder Prüfzertifikat',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte. Für max. 5 % der BGF(R) nach DIN 277 ist keine Dokumentation erforderlich.',
     qngRefNr: '5.5',
-    bnbRefNr: '1',
+    bnbRefNr: '5',
   },
   {
     id: 'dgnb-z3',
@@ -55,7 +55,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung und/oder Prüfzertifikat',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte. Für max. 5 % der BGF(R) nach DIN 277 ist keine Dokumentation erforderlich.',
     qngRefNr: '5.3',
-    bnbRefNr: '3',
+    bnbRefNr: '4',
   },
   {
     id: 'dgnb-z4',
@@ -72,7 +72,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '4.4',
-    bnbRefNr: '4',
+    bnbRefNr: '12',
   },
   {
     id: 'dgnb-z5',
@@ -89,7 +89,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung und/oder UBA-Begründung Biozideinsatz',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '5.2',
-    bnbRefNr: '5',
+    bnbRefNr: '6a',
   },
   {
     id: 'dgnb-z5b',
@@ -106,7 +106,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Betondachsteine',
     qngRefNr: '5.1',
-    bnbRefNr: '5',
+    bnbRefNr: '35',
   },
   {
     id: 'dgnb-z6',
@@ -174,7 +174,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Herstellererklärung / EMICODE Lizenz',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '3.1',
-    bnbRefNr: '6',
+    bnbRefNr: '10b',
   },
   {
     id: 'dgnb-z9',
@@ -191,7 +191,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Prüfzertifikat',
     geltungsbereich: 'Alle relevanten Bauteile. Für max. 5 % der BGF(R) ist keine Dokumentation erforderlich.',
     qngRefNr: '3.3',
-    bnbRefNr: '8',
+    bnbRefNr: '11',
   },
   {
     id: 'dgnb-z10',
@@ -208,7 +208,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '5.11',
-    bnbRefNr: '10',
+    bnbRefNr: '7',
   },
   {
     id: 'dgnb-z11',
@@ -259,7 +259,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '5.12',
-    bnbRefNr: '14',
+    bnbRefNr: '43',
   },
   {
     id: 'dgnb-z15',
@@ -276,7 +276,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'abZ / TM / SDB / Prüfzertifikat / AgBB-Nachweis',
     geltungsbereich: 'Werk und Baustelle für > 50 m² beschichteter Oberfläche',
     qngRefNr: '7.5',
-    bnbRefNr: '15',
+    bnbRefNr: '44',
   },
   {
     id: 'dgnb-z16',
@@ -293,7 +293,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Werk und Baustelle für > 500 m² beschichteter Oberfläche im Gebäude',
     qngRefNr: '7.1',
-    bnbRefNr: '16',
+    bnbRefNr: '13',
   },
   {
     id: 'dgnb-z17',
@@ -310,7 +310,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Werk und Baustelle für > 500 m² beschichteter Oberfläche',
     qngRefNr: '7.2',
-    bnbRefNr: '17',
+    bnbRefNr: '14',
   },
   {
     id: 'dgnb-z18',
@@ -327,7 +327,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Werk und Baustelle für > 500 m² beschichteter Oberfläche',
     qngRefNr: '7.3',
-    bnbRefNr: '18',
+    bnbRefNr: '15',
   },
   {
     id: 'dgnb-z19',
@@ -344,7 +344,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB',
     geltungsbereich: 'Werk und Baustelle für > 10 m² beschichteter Bauteilfläche',
     qngRefNr: '7.4',
-    bnbRefNr: '19',
+    bnbRefNr: '16',
   },
   {
     id: 'dgnb-z20',
@@ -361,7 +361,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile. Für max. 5 % der BGF(R) keine Doku.',
     qngRefNr: '5.7',
-    bnbRefNr: '20',
+    bnbRefNr: '17',
   },
   {
     id: 'dgnb-z21',
@@ -378,7 +378,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Prüfzertifikat',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '6.2',
-    bnbRefNr: '21',
+    bnbRefNr: '3b',
   },
   {
     id: 'dgnb-z22',
@@ -395,7 +395,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '5.10',
-    bnbRefNr: '22',
+    bnbRefNr: '20b',
   },
   {
     id: 'dgnb-z23',
@@ -412,7 +412,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung und/oder Prüfzertifikat',
     geltungsbereich: 'Alle relevanten Bauteile. Für max. 5 % der BGF(R) keine Doku.',
     qngRefNr: '5.8',
-    bnbRefNr: '23',
+    bnbRefNr: '19',
   },
   {
     id: 'dgnb-z24',
@@ -429,7 +429,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '5.9',
-    bnbRefNr: '24',
+    bnbRefNr: '20a',
   },
   {
     id: 'dgnb-z25',
@@ -446,7 +446,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '10.1',
-    bnbRefNr: '25',
+    bnbRefNr: '21',
   },
   {
     id: 'dgnb-z26',
@@ -463,7 +463,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '10.2',
-    bnbRefNr: '26',
+    bnbRefNr: '22',
   },
   {
     id: 'dgnb-z27',
@@ -480,7 +480,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder GISBAU-Einstufung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '6.5',
-    bnbRefNr: '27',
+    bnbRefNr: '23',
   },
   {
     id: 'dgnb-z28',
@@ -497,7 +497,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Planung, TM und/oder SDB und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '8.1',
-    bnbRefNr: '28',
+    bnbRefNr: '24',
   },
   {
     id: 'dgnb-z29',
@@ -514,7 +514,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Planung, TM und/oder SDB und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '8.2',
-    bnbRefNr: '29',
+    bnbRefNr: '25',
   },
   {
     id: 'dgnb-z30a',
@@ -531,7 +531,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile',
     qngRefNr: '8.3',
-    bnbRefNr: '30',
+    bnbRefNr: '26',
   },
   {
     id: 'dgnb-z30b',
@@ -548,7 +548,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärung',
     geltungsbereich: 'Innen: Alle Bauteile. Außen: Für max. 5 % BGF(R) keine Doku.',
     qngRefNr: '8.3',
-    bnbRefNr: '30',
+    bnbRefNr: '26',
   },
   {
     id: 'dgnb-z31',
@@ -565,7 +565,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '8.3',
-    bnbRefNr: '31',
+    bnbRefNr: '3a',
   },
   {
     id: 'dgnb-z31b',
@@ -582,7 +582,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung / DIBt Gutachten Nr. G-101-18-0008 für Bitumendachbahnen',
     geltungsbereich: 'Alle Abdichtungsbahnen',
     qngRefNr: '10.3',
-    bnbRefNr: '31b',
+    bnbRefNr: '37',
   },
   {
     id: 'dgnb-z32',
@@ -599,7 +599,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung',
     geltungsbereich: 'Alle relevanten Hüllbauteile > 5 m²',
     qngRefNr: '11.3',
-    bnbRefNr: '32',
+    bnbRefNr: '27',
   },
   {
     id: 'dgnb-z33',
@@ -616,7 +616,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'SDB und/oder Herstellererklärung',
     geltungsbereich: 'Werksseitig beschichtete Bauteile mit beschichteter Fläche > 100 m²',
     qngRefNr: '6.1',
-    bnbRefNr: '33',
+    bnbRefNr: '16',
   },
   {
     id: 'dgnb-z34',
@@ -633,7 +633,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Planung und/oder Herstellererklärung / UBA-Leitfaden',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '11.3',
-    bnbRefNr: '34',
+    bnbRefNr: '30',
   },
   {
     id: 'dgnb-z34.1',
@@ -650,7 +650,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Nachweis nach dem Berechnungsprogramm RegenwasserCheck ZINK',
     geltungsbereich: 'Alle Titanzinkbauteile',
     qngRefNr: '11.3',
-    bnbRefNr: '34.1',
+    bnbRefNr: '30',
   },
   {
     id: 'dgnb-z34.2',
@@ -667,7 +667,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Herstellererklärung zum Bleigehalt des Zinküberzugs (< 0,1 %) / Zinkbad (< 0,2 %)',
     geltungsbereich: 'Verzinkter Stahl > 100 m²',
     qngRefNr: '11.3',
-    bnbRefNr: '34.2',
+    bnbRefNr: '30',
   },
   {
     id: 'dgnb-z37',
@@ -684,7 +684,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TGA-Planung und/oder Herstellererklärung',
     geltungsbereich: 'Sämtliche Kälte- und Klimatechnik',
     qngRefNr: '13.3',
-    bnbRefNr: '37',
+    bnbRefNr: '34',
   },
   {
     id: 'dgnb-z38',
@@ -701,7 +701,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB und/oder Herstellererklärungen und/oder EC1PLUS-Nachweis',
     geltungsbereich: 'Alle relevanten Montageschäume',
     qngRefNr: '12.5',
-    bnbRefNr: '38',
+    bnbRefNr: '33',
   },
   {
     id: 'dgnb-z39',
@@ -718,7 +718,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Nachweis des mineralischen Klebers, Fugenschaum ohne halogenierte Treibmittel (TM/SDB)',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '12.5',
-    bnbRefNr: '39',
+    bnbRefNr: '33',
   },
   {
     id: 'dgnb-z40',
@@ -735,7 +735,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder Herstellererklärung',
     geltungsbereich: 'Alle für GEG relevanten Bauteile und TGA-Hauptstränge',
     qngRefNr: '12.1',
-    bnbRefNr: '40',
+    bnbRefNr: '32a',
   },
   {
     id: 'dgnb-z42',
@@ -752,7 +752,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder SDB gemäß 1907/2006/EG und Herstellererklärung "Keine Chlorparaffine und keine SVHC > 0,1%"',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '13.2',
-    bnbRefNr: '42',
+    bnbRefNr: '44',
   },
   {
     id: 'dgnb-z43',
@@ -769,7 +769,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder Herstellererklärung',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '12.2',
-    bnbRefNr: '43',
+    bnbRefNr: '45',
   },
   {
     id: 'dgnb-z44',
@@ -786,7 +786,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder Herstellererklärung "Keine SVHC-Stoffe > 0,1%"',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '11.1',
-    bnbRefNr: '44',
+    bnbRefNr: '29',
   },
   {
     id: 'dgnb-z45',
@@ -803,7 +803,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM und/oder Herstellererklärung "Keine Borverbindungen > 0,1%"',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '12.4',
-    bnbRefNr: '45',
+    bnbRefNr: '46b',
   },
   {
     id: 'dgnb-z46',
@@ -820,7 +820,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'TM + SDB',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '4.2',
-    bnbRefNr: '46',
+    bnbRefNr: '8',
   },
   {
     id: 'dgnb-z47',
@@ -837,7 +837,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Prüfnachweis gemäß DIN EN 16516 oder DIN EN 717-1',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '9.1',
-    bnbRefNr: '47',
+    bnbRefNr: '41',
   },
   {
     id: 'dgnb-z47d',
@@ -854,7 +854,7 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Prüfnachweis gemäß DIN EN 16516',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '9.2',
-    bnbRefNr: '47d',
+    bnbRefNr: '41',
   },
   {
     id: 'dgnb-z48',
@@ -871,6 +871,6 @@ export const DEFAULT_DGNB_ENV12_MATRIX: CriteriaRow[] = [
     artDokumentation: 'Prüfnachweis gemäß DIN EN 16516 / QDF-Liste',
     geltungsbereich: 'Alle relevanten Bauteile und Bauprodukte',
     qngRefNr: '9.1',
-    bnbRefNr: '48',
+    bnbRefNr: '41',
   },
 ];

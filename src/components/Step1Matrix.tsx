@@ -42,6 +42,7 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Modal state for reviewed criteria from scanned PDF
   const [pendingScanResult, setPendingScanResult] = useState<{
@@ -67,8 +68,24 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isLocalhost =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const maxBytes = isLocalhost ? 35 * 1024 * 1024 : 3.2 * 1024 * 1024;
+
+    if (file.size > maxBytes) {
+      setUploadError(
+        isLocalhost
+          ? 'Die PDF-Datei ist zu groß (maximal 35 MB zulässig).'
+          : `Die PDF-Datei (${(file.size / (1024 * 1024)).toFixed(1)} MB) überschreitet das Vercel-Serverless-Limit von ca. 3,2 MB. Bitte laden Sie nur den relevanten Kriterien-Auszug hoch.`
+      );
+      e.target.value = '';
+      return;
+    }
+
     setIsUploading(true);
     setUploadMessage(null);
+    setUploadError(null);
 
     const reader = new FileReader();
     reader.onload = async () => {
@@ -80,6 +97,7 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           standardName?: string;
           institute?: string;
           version?: string;
+          warnings?: string[];
           message?: string;
         }>('/api/standards/parse-guideline-pdf', {
           method: 'POST',
@@ -94,31 +112,28 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           setPendingScanResult({
             isOpen: true,
             standardName: res.data.standardName || file.name.replace(/\.[^/.]+$/, ''),
-            institute: res.data.institute || 'Unabhängiges Institut / Prüfstelle',
+            institute: res.data.institute || 'Nicht im Leitfaden angegeben',
             version: res.data.version || new Date().getFullYear().toString(),
             rows: res.data.matrix,
           });
-          setUploadMessage(`Erfolgreich gescannt: ${res.data.matrix.length} Kriterienzeilen gefunden. Bitte bestätigen Sie die Angaben.`);
+          const warnSummary =
+            res.data.warnings && res.data.warnings.length > 0
+              ? ` (${res.data.warnings.join(' ')})`
+              : '';
+          setUploadMessage(
+            `Erfolgreich gescannt: ${res.data.matrix.length} Kriterienzeilen gefunden. Bitte prüfen und bestätigen Sie die Angaben.${warnSummary}`
+          );
         } else {
-          // Resilient client fallback
-          setPendingScanResult({
-            isOpen: true,
-            standardName: file.name.replace(/\.[^/.]+$/, ''),
-            institute: 'Gescannter Nachhaltigkeitsstandard (Leitfaden)',
-            version: new Date().getFullYear().toString(),
-            rows: DEFAULT_DGNB_ENV12_MATRIX,
-          });
-          setUploadMessage(`Dokument "${file.name}" eingelesen. Standard-Kriterienmatrix zur Überprüfung im Dialog bereitgestellt.`);
+          setUploadError(
+            res.data?.message ||
+              res.error ||
+              `Das Leitfaden-PDF "${file.name}" konnte nicht ausgelesen werden. Es wurden keine Kriterien überschrieben.`
+          );
         }
       } catch (err: any) {
-        setPendingScanResult({
-          isOpen: true,
-          standardName: file.name.replace(/\.[^/.]+$/, ''),
-          institute: 'Gescannter Nachhaltigkeitsstandard (Leitfaden)',
-          version: new Date().getFullYear().toString(),
-          rows: DEFAULT_DGNB_ENV12_MATRIX,
-        });
-        setUploadMessage(`Dokument "${file.name}" bereitgestellt. Bitte überprüfen und bestätigen Sie die Kriterien im Dialog.`);
+        setUploadError(
+          `Fehler beim Scannen von "${file.name}": ${err?.message || 'Unbekannter Fehler'}. Es wurden keine Kriterien überschrieben.`
+        );
       } finally {
         setIsUploading(false);
       }
@@ -298,6 +313,12 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           </div>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center space-x-2">
+          <span>{uploadError}</span>
+        </div>
+      )}
 
       {uploadMessage && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center space-x-2">

@@ -66,7 +66,7 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
                 QM-Tool Nachhaltigkeit · Baustoff-Konformitätsgutachten
               </div>
               <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-1">
-                KONFORMITÄTSNACHWEIS NACHHALTIGKEIT
+                {result.customerReport?.title || 'KONFORMITÄTSNACHWEIS NACHHALTIGKEIT'}
               </h1>
               <p className="text-xs text-slate-600 font-medium">
                 Schadstoff- und Emissionsbewertung nach anerkannten Zertifizierungsgrundlagen
@@ -188,7 +188,32 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
             <p className="text-xs text-slate-700 leading-relaxed">
               {result.synopticSummary?.overallRecommendation}
             </p>
+            {result.customerReport?.conclusion && (
+              <p className="text-xs font-semibold text-slate-900 pt-1">
+                {result.customerReport.conclusion}
+              </p>
+            )}
           </div>
+
+          {result.isProvisional && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Vorläufiges Prüfergebnis:</strong> Einzelne Parameter oder Nachweise erfordern noch eine manuelle Kontrolle am Originaldokument (siehe Markierung „Prüfung erforderlich“ in der Detailtabelle).
+              </div>
+            </div>
+          )}
+
+          {result.assumptions && result.assumptions.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs space-y-1">
+              <div className="font-bold text-slate-900">Dokumentierte Prüfannahmen:</div>
+              <ul className="list-disc list-inside text-[11px] space-y-0.5">
+                {result.assumptions.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Detailed Parameter lists per standard */}
@@ -209,7 +234,7 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
                   <thead>
                     <tr className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
                       <th className="py-2 px-3">Parameter</th>
-                      <th className="py-2 px-3">Ermittelter Messwert</th>
+                      <th className="py-2 px-3">Ermittelter Messwert &amp; Quelle</th>
                       <th className="py-2 px-3">Zielanforderung</th>
                       <th className="py-2 px-3 text-center">Stufe</th>
                       <th className="py-2 px-3">Status</th>
@@ -219,12 +244,29 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
                     {ev.parameters.map((p, idx) => (
                       <tr key={idx} className={p.isBottleneck ? 'bg-amber-50/50' : ''}>
                         <td className="py-2 px-3 font-semibold text-slate-900">{p.parameterName}</td>
-                        <td className="py-2 px-3 font-mono">{p.productValue}</td>
+                        <td className="py-2 px-3 font-mono">
+                          <div>{p.productValue}</div>
+                          {p.evidence && p.evidence.source !== 'missing' && (
+                            <div className="text-[10px] font-sans text-slate-500 mt-0.5">
+                              {p.evidence.verification === 'verified'
+                                ? `PDF verifiziert${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
+                                : p.evidence.verification === 'partial'
+                                ? `Teilweise belegt${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
+                                : p.evidence.verification === 'manual'
+                                ? 'Manuell bestätigt'
+                                : 'Manuell zu prüfen'}
+                            </div>
+                          )}
+                        </td>
                         <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">{p.requiredForQS4}</td>
                         <td className="py-2 px-3 text-center font-bold font-mono">Stufe {p.achievedLevel}</td>
                         <td className="py-2 px-3">
-                          {p.isBottleneck ? (
-                            <span className="text-[11px] font-bold text-amber-700">K.O.-Begrenzung</span>
+                          {p.status === 'fail' || p.achievedLevel === 1 ? (
+                            <span className="text-[11px] font-bold text-rose-700">Nicht belegt / K.O.</span>
+                          ) : p.needsManualReview ? (
+                            <span className="text-[11px] font-bold text-amber-700">Prüfung erforderlich</span>
+                          ) : p.isBottleneck || p.status === 'warning' ? (
+                            <span className="text-[11px] font-bold text-amber-700">Begrenzend (Stufe {p.achievedLevel})</span>
                           ) : (
                             <span className="text-[11px] text-emerald-700">Erfüllt</span>
                           )}

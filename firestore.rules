@@ -1,4 +1,53 @@
 rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: vault
+// Document ID: 'company'
+// Fields:
+//   - saltHex: string (required, 16..128 chars) - PBKDF2 salt in hex
+//   - verifierHex: string (required, 16..512 chars) - AES-GCM verifier in hex
+//   - updatedAt: string (required, <= 64 chars) - ISO timestamp
+//   - updatedByEmail: string (optional, <= 256 chars) - Admin email
+//   - updatedByUid: string (optional, <= 128 chars) - Admin UID
+//   - authorizedEmails: list (optional, <= 500 items) - Authorized employee emails
+//
+// Collection: users
+// Document ID: {userId} (matches Firebase Auth UID)
+// Fields:
+//   - uid: string (required, <= 128 chars, immutable identity)
+//   - email: string (required, <= 256 chars)
+//   - corporateEmail: string (optional, <= 256 chars)
+//   - role: string (optional, <= 64 chars)
+//   - hasPassphrase: bool (optional)
+//   - passphraseSalt: string (optional, <= 128 chars)
+//   - passphraseVerifier: string (optional, <= 512 chars)
+//   - createdAt: string (optional, <= 64 chars)
+//   - updatedAt: string (optional, <= 64 chars)
+//
+// Collection: audits
+// Document ID: {auditId} (alphanumeric, underscore, hyphen, <= 128 chars)
+// Fields:
+//   - id: string (required, <= 128 chars)
+//   - userId: string (required, <= 128 chars, matches creator UID)
+//   - userEmail: string (required, <= 256 chars)
+//   - projectName: string (required, <= 256 chars)
+//   - productName: string (required, <= 256 chars)
+//   - qualityLevel: int (required, 0..4, where 0 = K.O. / non-compliant)
+//   - manufacturer: string (optional, <= 256 chars)
+//   - auditDate: string (optional, <= 64 chars)
+//   - encryptedPayload: string (optional, <= 200000 chars)
+//   - criteriaRowNr: string (optional, <= 32 chars)
+//   - schemaVersion: int (optional, 1..10)
+//   - isProvisional: bool (optional)
+//   - selectedStandardCodes: list (optional, <= 20 items)
+//   - createdAt: string (optional, <= 64 chars)
+//   - updatedAt: string (optional, <= 64 chars)
+//
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
     // Global default deny
@@ -6,49 +55,96 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string
+        && (
+          request.auth.token.email.lower() == 'brian.lackmann@kaubit.de' ||
+          request.auth.token.email.lower() == 'brianlackmann@gmail.com'
+        );
     }
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidCompanyVault(data) {
+      return data.keys().hasAll(['saltHex', 'verifierHex', 'updatedAt'])
+        && data.saltHex is string && data.saltHex.size() >= 16 && data.saltHex.size() <= 128
+        && data.verifierHex is string && data.verifierHex.size() >= 16 && data.verifierHex.size() <= 512
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!('updatedByEmail' in data) || (data.updatedByEmail is string && data.updatedByEmail.size() <= 256))
+        && (!('updatedByUid' in data) || (data.updatedByUid is string && data.updatedByUid.size() <= 128))
+        && (!('authorizedEmails' in data) || (data.authorizedEmails is list && data.authorizedEmails.size() <= 500));
+    }
+
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email'])
-        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.uid is string && data.uid.size() <= 128 && (data.uid == request.auth.uid || isAdmin())
         && data.email is string && data.email.size() <= 256
+        && (!('corporateEmail' in data) || (data.corporateEmail is string && data.corporateEmail.size() <= 256))
+        && (!('role' in data) || (data.role is string && data.role.size() <= 64 && (data.role != 'admin' || isAdmin())))
         && (!('hasPassphrase' in data) || data.hasPassphrase is bool)
         && (!('passphraseSalt' in data) || (data.passphraseSalt is string && data.passphraseSalt.size() <= 128))
-        && (!('passphraseVerifier' in data) || (data.passphraseVerifier is string && data.passphraseVerifier.size() <= 256));
+        && (!('passphraseVerifier' in data) || (data.passphraseVerifier is string && data.passphraseVerifier.size() <= 512))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
     function isValidProjectAudit(data) {
       return data.keys().hasAll(['id', 'userId', 'userEmail', 'projectName', 'productName', 'qualityLevel'])
         && data.id is string && data.id.size() <= 128
-        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.userId is string && data.userId.size() <= 128 && (data.userId == request.auth.uid || isAdmin())
         && data.userEmail is string && data.userEmail.size() <= 256
         && data.projectName is string && data.projectName.size() <= 256
         && data.productName is string && data.productName.size() <= 256
-        && data.qualityLevel is int && data.qualityLevel >= 1 && data.qualityLevel <= 4
+        && data.qualityLevel is int && data.qualityLevel >= 0 && data.qualityLevel <= 4
         && (!('manufacturer' in data) || (data.manufacturer is string && data.manufacturer.size() <= 256))
         && (!('auditDate' in data) || (data.auditDate is string && data.auditDate.size() <= 64))
-        && (!('encryptedPayload' in data) || (data.encryptedPayload is string && data.encryptedPayload.size() <= 100000));
+        && (!('encryptedPayload' in data) || (data.encryptedPayload is string && data.encryptedPayload.size() <= 200000))
+        && (!('criteriaRowNr' in data) || (data.criteriaRowNr is string && data.criteriaRowNr.size() <= 32))
+        && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 10))
+        && (!('isProvisional' in data) || data.isProvisional is bool)
+        && (!('selectedStandardCodes' in data) || (data.selectedStandardCodes is list && data.selectedStandardCodes.size() <= 20))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /vault/{vaultId} {
+      allow get: if isSignedIn() && vaultId == 'company';
+      allow create, update: if isAdmin() && vaultId == 'company' && isValidCompanyVault(request.resource.data);
+      allow delete, list: if false;
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
-      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUserProfile(request.resource.data);
-      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUserProfile(request.resource.data);
-      allow delete: if false;
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin()) && request.resource.data.uid == userId && isValidUserProfile(request.resource.data);
+      allow update: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin()) && request.resource.data.uid == userId && isValidUserProfile(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /audits/{auditId} {
-      allow get: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(auditId) && isValidProjectAudit(request.resource.data);
-      allow update: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid && isValidProjectAudit(request.resource.data);
-      allow delete: if isSignedIn() && isValidId(auditId) && resource.data.userId == request.auth.uid;
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(auditId) && request.resource.data.userId == request.auth.uid && isValidProjectAudit(request.resource.data);
+      allow update: if isSignedIn() && isValidId(auditId) && (resource.data.userId == request.auth.uid || isAdmin()) && isValidProjectAudit(request.resource.data);
+      allow delete: if isSignedIn() && isValidId(auditId) && (resource.data.userId == request.auth.uid || isAdmin());
     }
   }
 }
