@@ -6,7 +6,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { jwtVerify, createRemoteJWKSet, decodeJwt } from 'jose';
 import { DEFAULT_DGNB_ENV12_MATRIX } from './src/data/defaultDgnbMatrix';
 import { INITIAL_SUSTAINABILITY_STANDARDS, DEFAULT_QNG_MATRIX, DEFAULT_BNB_MATRIX } from './src/data/standardsCatalogs';
-import { evaluateDgnbCompliance, isEmailAllowed } from './src/utils/dgnbEvaluation';
+import { evaluateDgnbCompliance, isEmailAllowed, evaluateTestDateAge } from './src/utils/dgnbEvaluation';
 import {
   CriteriaRow,
   ParameterEvaluation,
@@ -414,11 +414,12 @@ app.post('/api/standards/parse-guideline-pdf', async (req: Request, res: Respons
 
     const prompt = `Du bist ein Fachexperte für Bauökologie und Nachhaltigkeits-Zertifizierungssysteme im Bauwesen (wie DGNB, QNG, BNB, LEED, BREEAM, NaWoh).
 Analysiere das beigefügte Leitfaden-/Kriteriendokument ("${filename || 'Dokument'}").
+Achte bei DGNB-Dokumenten insbesondere auf Seite 17 ff. ("Anlage 1 – Kriterienmatrix V23.3") für die vollständige Tabellen-Extraktion aller Zeilen (Zeile 1 bis Zeile 40+).
 Extrahiere:
-1. Den Namen des Standards/Kriteriums (z. B. "QNG Anhang 3" oder "BNB Kriterium 1.1.6" oder "DGNB ENV1.2").
-2. Das herausgebende Institut bzw. die Einrichtung (z. B. BMWSB, BBSR, DGNB, UBA).
+1. Den genauen Namen des Standards/Kriteriums (z. B. "DGNB ENV1.2 (Neubau 2023)", "QNG Anhang 3", "BNB Kriterium 1.1.6").
+2. Das herausgebende Institut bzw. die Einrichtung (z. B. DGNB e.V., BMWSB, BBSR).
 3. Die Versionsnummer oder das Ausgabejahr (z. B. "2023" oder "2024").
-4. Die Kriterienmatrix mit allen gefundenen Produktgruppen / Bauteilen, betrachteten Schadstoffen, Normen und den jeweiligen Stufen-Anforderungen (Stufe 1 bis Stufe 4 bzw. Basis bis Premium) sowie der erforderlichen Nachweisführung.`;
+4. Die vollständige Kriterienmatrix mit allen einzelnen Zeilen, Bauteilen, betrachteten Schadstoffen, Bezugsnormen, den Anforderungen für Qualitätsstufe 1 bis 4 sowie der erforderlichen Nachweisführung.`;
 
     parts.push({ text: prompt });
 
@@ -570,11 +571,12 @@ Extrahiere präzise alle relevanten Daten für die baustoffökologische Bewertun
 3. Hersteller / Lieferant / Inverkehrbringer
 4. Empfohlene Zeilennummer der DGNB ENV1.2 Kriterienmatrix (1 = Innenwandfarben/Beschichtungen, 2 = Spachtelmassen/Putze, 3 = Grundierungen/Tiefgrund, 4 = Lacke/Lasuren außen, 5 = Klebstoffe/Dichtstoffe, 6 = Bodenbeläge/Verlegewerkstoffe, etc. - Nummer als String, z.B. "1")
 5. VOC-Gehalt (genaue Angabe in g/l oder %, z.B. "< 1 g/l (lösemittelfrei gem. VdL-RL01)" oder "VOC: 28 g/l")
-6. SVHC-Status nach REACH (z.B. "Keine SVHC > 0,1 % w/w enthalten", oder Benennung von Schadstoffen)
-7. Zertifikate / Umweltzeichen / Prüfzeichen (z.B. "Blauer Engel (DE-UZ 102)", "EMICODE EC1 PLUS", "AgBB", "Natureplus", "GISCODE M-DF01")
-8. Erwähnung von Bauteilkatalog / Baustellendokumentation (true/false)
-9. Ausführlicher Textauszug / Zusammenfassung (summarySnippet) für die Dokumentation im Gutachten
-10. fieldQuotes: Für jedes extrahierte Feld (productName, manufacturer, suggestedCriteriaNr, vocContent, svhcStatus, certificates) ein Zitat mit dem exakten Wortlaut aus dem PDF, Fundstelle/Abschnitt und Konfidenz ("high", "medium", "low").`;
+6. Datum des VOC-Prüfberichts / der Emissionsmessung (vocTestDate, z.B. "15.05.2023" oder "2023" - wichtig für Alter & Gültigkeit nach AgBB/DGNB ≤ 5 Jahre)
+7. SVHC-Status nach REACH (z.B. "Keine SVHC > 0,1 % w/w enthalten", oder Benennung von Schadstoffen)
+8. Zertifikate / Umweltzeichen / Prüfzeichen (z.B. "Blauer Engel (DE-UZ 102)", "EMICODE EC1 PLUS", "AgBB", "Natureplus", "GISCODE M-DF01")
+9. Erwähnung von Bauteilkatalog / Baustellendokumentation (true/false)
+10. Ausführlicher Textauszug / Zusammenfassung (summarySnippet) für die Dokumentation im Gutachten
+11. fieldQuotes: Für jedes extrahierte Feld (productName, manufacturer, suggestedCriteriaNr, vocContent, vocTestDate, svhcStatus, certificates) ein Zitat mit dem exakten Wortlaut aus dem PDF, Fundstelle/Abschnitt und Konfidenz ("high", "medium", "low").`;
 
     let parsed: any = null;
     let attempts = 0;
@@ -605,6 +607,7 @@ Extrahiere präzise alle relevanten Daten für die baustoffökologische Bewertun
                 manufacturer: { type: Type.STRING },
                 suggestedCriteriaNr: { type: Type.STRING },
                 vocContent: { type: Type.STRING },
+                vocTestDate: { type: Type.STRING },
                 svhcStatus: { type: Type.STRING },
                 certificates: {
                   type: Type.ARRAY,
@@ -644,38 +647,19 @@ Extrahiere präzise alle relevanten Daten für die baustoffökologische Bewertun
     }
 
     if (!parsed || !parsed.productName) {
-      // Graceful fallback so user can still review and edit values in the modal
+      // Honest fallback without invented numbers or fake certificates
       const isSdb = documentType === 'sdb';
       parsed = {
         documentType,
         productName: filename.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-        manufacturer: 'Hersteller gemäß ' + (isSdb ? 'Sicherheitsdatenblatt' : 'Prüfbericht'),
+        manufacturer: 'Hersteller im PDF verifizieren',
         suggestedCriteriaNr: '1',
-        vocContent: isSdb ? '< 1 g/l (lösemittelfrei gem. VdL-RL01)' : '< 1 g/l',
-        svhcStatus: 'Keine SVHC > 0,1 % w/w (REACH Art. 33 konform)',
-        certificates: isSdb
-          ? ['EMICODE EC1 PLUS', 'GISCODE M-DF01']
-          : ['Blauer Engel (DE-UZ 102)', 'EMICODE EC1 PLUS', 'AgBB-Prüfbericht'],
+        vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
+        svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+        certificates: [],
         hasBauteilekatalog: true,
-        summarySnippet: `Dokument "${filename}" erfasst. Relevante bauökologische Parameter zur Bestätigung bereitgestellt.`,
-        fieldQuotes: [
-          {
-            field: 'vocContent',
-            label: 'VOC-Gehalt',
-            value: '< 1 g/l (lösemittelfrei)',
-            quote: 'VOC-Gehalt: < 1 g/l (gemäß technischer Dokumentation)',
-            pageOrSection: isSdb ? 'Abschnitt 9 / 15' : 'Prüfkammerprotokoll',
-            confidence: 'medium',
-          },
-          {
-            field: 'svhcStatus',
-            label: 'SVHC nach REACH',
-            value: 'Keine SVHC > 0,1 %',
-            quote: 'Keine besonders besorgniserregenden Stoffe der REACH-Kandidatenliste > 0,1 % w/w',
-            pageOrSection: isSdb ? 'Abschnitt 3 / 15' : 'Chemische Analyse',
-            confidence: 'medium',
-          },
-        ],
+        summarySnippet: `Dokument "${filename}" wurde hochgeladen. Da manche Messwerte nicht automatisch identifiziert werden konnten, überprüfen Sie bitte die Felder und ergänzen Sie diese gegebenenfalls.`,
+        fieldQuotes: [],
       };
     }
 
@@ -691,7 +675,6 @@ Extrahiere präzise alle relevanten Daten für die baustoffökologische Bewertun
     console.warn('Error parsing document PDF via Gemini, returning resilient fallback:', err);
     const docType = req.body?.documentType || 'sdb';
     const fname = req.body?.filename || 'Dokument.pdf';
-    const isSdb = docType === 'sdb';
 
     return res.json({
       success: true,
@@ -699,33 +682,14 @@ Extrahiere präzise alle relevanten Daten für die baustoffökologische Bewertun
         documentType: docType,
         filename: fname,
         productName: fname.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-        manufacturer: 'Hersteller gemäß ' + (isSdb ? 'Sicherheitsdatenblatt' : 'Prüfbericht'),
+        manufacturer: 'Hersteller im PDF verifizieren',
         suggestedCriteriaNr: '1',
-        vocContent: isSdb ? '< 1 g/l (lösemittelfrei gem. VdL-RL01)' : '< 1 g/l',
-        svhcStatus: 'Keine SVHC > 0,1 % w/w (REACH Art. 33 konform)',
-        certificates: isSdb
-          ? ['EMICODE EC1 PLUS', 'GISCODE M-DF01']
-          : ['Blauer Engel (DE-UZ 102)', 'EMICODE EC1 PLUS', 'AgBB-Prüfbericht'],
+        vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
+        svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+        certificates: [],
         hasBauteilekatalog: true,
-        summarySnippet: `Dokument "${fname}" erfasst. Relevante bauökologische Parameter zur Bestätigung bereitgestellt.`,
-        fieldQuotes: [
-          {
-            field: 'vocContent',
-            label: 'VOC-Gehalt',
-            value: '< 1 g/l (lösemittelfrei)',
-            quote: 'VOC-Gehalt: < 1 g/l (gemäß technischer Dokumentation)',
-            pageOrSection: isSdb ? 'Abschnitt 9 / 15' : 'Prüfkammerprotokoll',
-            confidence: 'medium',
-          },
-          {
-            field: 'svhcStatus',
-            label: 'SVHC nach REACH',
-            value: 'Keine SVHC > 0,1 %',
-            quote: 'Keine besonders besorgniserregenden Stoffe der REACH-Kandidatenliste > 0,1 % w/w',
-            pageOrSection: isSdb ? 'Abschnitt 3 / 15' : 'Chemische Analyse',
-            confidence: 'medium',
-          },
-        ],
+        summarySnippet: `Dokument "${fname}" wurde verarbeitet. Bitte ergänzen Sie fehlende Parameter im Bestätigungsdialog.`,
+        fieldQuotes: [],
       },
       source: 'resilient-fallback',
     });
@@ -756,33 +720,123 @@ app.post('/api/standards/analyze-product', async (req: Request, res: Response) =
       : ['DGNB'];
 
     const ai = getGeminiClient();
-    const identifiedProductName = productName || 'Geprüftes Bauprodukt';
-    const identifiedManufacturer = manufacturer || 'Hersteller';
+    const identifiedProductName = productName?.trim() || 'Geprüftes Bauprodukt';
+    const identifiedManufacturer = manufacturer?.trim() || 'Hersteller laut Deklaration';
 
-    // Map of evaluation per selected standard
     const evaluations: Record<string, SingleStandardEvaluationResult> = {};
 
-    // 1. Evaluate DGNB if selected
-    if (targetStandards.includes('DGNB')) {
-      const dgnbRow: CriteriaRow =
-        DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === String(criteriaRowNr)) || DEFAULT_DGNB_ENV12_MATRIX[0];
+    // Standard criteria lookup helpers
+    const dgnbRow: CriteriaRow =
+      DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === String(criteriaRowNr)) || DEFAULT_DGNB_ENV12_MATRIX[0];
 
-      let dgnbParams: ParameterEvaluation[] = [];
-      let dgnbRec = '';
+    const dgnbToQngMap: Record<string, string> = {
+      '1': '5.5', '2': '6.1', '3': '5.3', '4': '6.1', '5': '7.1', '6': '3.1', '7': '3.1',
+      '8': '4.1', '9': '4.1', '10': '4.3', '11': '9.2', '12': '8.1', '13': '6.2', '14': '5.12',
+      '15': '5.12', '16': '3.2', '17': '5.3', '18': '2.2', '19': '2.1', '20': '5.2', '21': '5.1',
+      '22': '5.8', '23': '12.1', '24': '12.5', '25': '12.3', '26': '12.4', '27': '11.1', '28': '13.3',
+      '29': '13.2', '30': '8.1', '31': '5.11', '32': '3.2', '33': '3.3', '34': '3.3', '35': '11.1',
+      '36': '4.3', '37': '5.12', '38': '10.3', '39': '11.3', '40': '9.2'
+    };
 
-      if (ai && (sdbText || testReportText)) {
+    const dgnbToBnbMap: Record<string, string> = {
+      '1': '5', '2': '3a', '3': '4', '4': '3a', '5': '13', '6': '10b', '7': '10a',
+      '8': '8', '9': '8', '10': '9', '11': '41', '12': '24', '13': '3b', '14': '43',
+      '15': '43', '16': '10a', '17': '4', '18': '2a', '19': '1', '20': '6a', '21': '35',
+      '22': '19', '23': '32a', '24': '33', '25': '32a', '26': '46b', '27': '29', '28': '34',
+      '29': '44', '30': '25', '31': '7', '32': '10a', '33': '11', '34': '11', '35': '29',
+      '36': '9', '37': '43', '38': '37', '39': '30', '40': '41'
+    };
+
+    const qngTargetNr = dgnbToQngMap[String(criteriaRowNr)] || String(criteriaRowNr);
+    const qngRow: CriteriaRow =
+      DEFAULT_QNG_MATRIX.find((r) => r.nr === qngTargetNr || r.nr === String(criteriaRowNr)) || DEFAULT_QNG_MATRIX[0];
+
+    const bnbTargetNr = dgnbToBnbMap[String(criteriaRowNr)] || String(criteriaRowNr);
+    const bnbRow: CriteriaRow =
+      DEFAULT_BNB_MATRIX.find((r) => r.nr === bnbTargetNr || r.nr === String(criteriaRowNr)) || DEFAULT_BNB_MATRIX[0];
+
+    const combinedText = `${sdbText || ''}\n${testReportText || ''}`.trim();
+
+    // Loop through each selected standard and evaluate with AI or strict non-hallucinating rules
+    for (const code of targetStandards) {
+      let stdName = code;
+      let institute = 'Zertifizierungsinstitut';
+      let criteriaTitle = 'Kriterienmatrix';
+      let criteriaNr = '1';
+      let rowContext = '';
+
+      let activeRow: CriteriaRow | null = null;
+
+      if (code === 'DGNB') {
+        stdName = 'DGNB ENV1.2 (Neubau 2023)';
+        institute = 'Deutsche Gesellschaft für Nachhaltiges Bauen (DGNB)';
+        criteriaTitle = dgnbRow.bauteil;
+        criteriaNr = `Zeile ${dgnbRow.nr}`;
+        activeRow = dgnbRow;
+      } else if (code === 'QNG') {
+        stdName = 'QNG Anhang 313 (Siegel 2023/2024)';
+        institute = 'BMWSB / BiRN (Bundesförderung KfW)';
+        criteriaTitle = qngRow.bauteil;
+        criteriaNr = `Pos. ${qngRow.nr}`;
+        activeRow = qngRow;
+      } else if (code === 'BNB') {
+        stdName = 'BNB Neubau 1.1.6 (Bundesbau)';
+        institute = 'Bundesinstitut für Bau-, Stadt- und Raumforschung (BBSR)';
+        criteriaTitle = bnbRow.bauteil;
+        criteriaNr = `Pos. ${bnbRow.nr}`;
+        activeRow = bnbRow;
+      } else {
+        // Custom uploaded standard
+        const customStd = (standards || []).find((s: any) => s.code === code);
+        stdName = customStd?.name || `Individueller Standard (${code})`;
+        institute = customStd?.institute || 'Herausgebendes Institut';
+        activeRow = customStd?.criteriaRows?.[0] || null;
+        criteriaTitle = activeRow?.bauteil || 'Individuelle Kriterienzeile';
+        criteriaNr = activeRow?.nr || '1';
+      }
+
+      if (activeRow) {
+        rowContext = `Kriterium: ${activeRow.bauteil} (${activeRow.betrachteteStoffe})
+Anforderungen:
+- Stufe 1: ${activeRow.qs1}
+- Stufe 2: ${activeRow.qs2}
+- Stufe 3: ${activeRow.qs3}
+- Stufe 4 (Ziel): ${activeRow.qs4}`;
+      }
+
+      let evaluatedParams: ParameterEvaluation[] = [];
+      let recommendation = '';
+
+      if (ai && combinedText.length > 5) {
         try {
-          const prompt = `Analysiere Sicherheitsdatenblatt (SDB) und Prüfbericht gegen die DGNB-Zeile ${dgnbRow.nr} (${dgnbRow.bauteil}).
-Grenzwerte: QS1: ${dgnbRow.qs1}, QS2: ${dgnbRow.qs2}, QS3: ${dgnbRow.qs3}, QS4: ${dgnbRow.qs4}.
-Eingereichte Dokumente:
-SDB: ${sdbText || ''}
-Prüfbericht: ${testReportText || ''}`;
+          const prompt = `Du bist ein strenger Bauökologie-Auditor für den Nachhaltigkeitsstandard "${stdName}" (${institute}).
+Bewerten Sie das Bauprodukt "${identifiedProductName}" (${identifiedManufacturer}) basierend auf folgenden eingereichten Dokumententexten:
+
+--- DOKUMENTEN-INHALTE ---
+Sicherheitsdatenblatt / Prüfbericht:
+${combinedText}
+--- ENDE DOKUMENTEN-INHALTE ---
+
+--- PRÜFGRUNDLAGE ---
+${rowContext}
+--- ENDE PRÜFGRUNDLAGE ---
+
+STRIKTE AUDIT-REGELN:
+1. Analysiere für die wesentlichen Parameter (VOC-Gehalt, Datum/Alter des VOC-Prüfberichts, REACH SVHC, Umweltzeichen/Prüfbericht) die im Dokument vorliegenden Messwerte.
+2. ALTERS- & GÜLTIGKEITSPRÜFUNG VON PRÜFBERICHTEN (DGNB, AgBB, EMICODE):
+   - Prüfe zwingend das Datum des VOC-Prüfberichts/Kammertests.
+   - Datum <= 5 Jahre (z.B. ab 2021/2022): Gültig (achievedLevel: 4).
+   - Datum > 5 bis 10 Jahre (z.B. 2016-2020): Warnung (achievedLevel: 2), schriftliche Herstellerexplikation über Rezeptur-Unverändertheit erforderlich.
+   - Datum > 10 Jahre oder abgelaufen: K.O. (achievedLevel: 1), Prüfbericht ist veraltet.
+   - Kein Datum angegeben: achievedLevel: 2 mit Warnhinweis zur 5-Jahres-Gültigkeitsfrist.
+3. WICHTIG - NICHT RATEN ODER ERFINDEN: Wenn für einen Parameter KEINE konkrete Angabe im Text zu finden ist, setze productValue auf "Kein Nachweis im Dokument", vergebe achievedLevel: 1 und begründe, dass der Nachweis fehlt.
+4. Vergib als achievedLevel nur ganze Zahlen von 1 bis 4.`;
 
           const response = await ai.models.generateContent({
             model: 'gemini-3.8-flash',
             contents: prompt,
             config: {
-              systemInstruction: 'Antworte als valides JSON entsprechend des vorgegebenen Schemas.',
+              systemInstruction: 'Antworte ausschließlich im validen JSON-Format gemäß vorgegebenem Schema. Erfinde oder rate keine Messwerte.',
               responseMimeType: 'application/json',
               responseSchema: {
                 type: Type.OBJECT,
@@ -801,101 +855,149 @@ Prüfbericht: ${testReportText || ''}`;
                       required: ['parameterName', 'productValue', 'requiredForQS4', 'achievedLevel', 'explanation'],
                     },
                   },
-                  recommendationForQS4: { type: Type.STRING },
+                  recommendation: { type: Type.STRING },
                 },
-                required: ['parameters', 'recommendationForQS4'],
+                required: ['parameters', 'recommendation'],
               },
             },
           });
 
           const parsed = JSON.parse(response.text || '{}');
           if (Array.isArray(parsed.parameters) && parsed.parameters.length > 0) {
-            dgnbParams = parsed.parameters.map((p: any) => ({
+            evaluatedParams = parsed.parameters.map((p: any) => ({
               parameterName: p.parameterName,
-              productValue: p.productValue,
-              requiredForQS4: p.requiredForQS4,
+              productValue: p.productValue || 'Kein Nachweis im Dokument',
+              requiredForQS4: p.requiredForQS4 || (activeRow ? activeRow.qs4 : 'Höchste Anforderung'),
               achievedLevel: Math.min(4, Math.max(1, Number(p.achievedLevel) || 1)) as 1 | 2 | 3 | 4,
               isBottleneck: false,
               status: 'pass',
               explanation: p.explanation || '',
             }));
           }
-          dgnbRec = parsed.recommendationForQS4 || '';
+          recommendation = parsed.recommendation || '';
         } catch (e) {
-          console.warn('Gemini DGNB analysis error, falling back to deterministic evaluation:', e);
+          console.warn(`Gemini analysis error for ${code}:`, e);
         }
       }
 
-      // Deterministic fallback if needed
-      if (dgnbParams.length === 0) {
-        const combined = `${sdbText || ''} ${testReportText || ''}`.toLowerCase();
-        let vocLevel: 1 | 2 | 3 | 4 = 2;
-        let vocVal = 'VOC ca. 28 g/l';
-        if (combined.includes('lösemittelfrei') || combined.includes('< 1 g/l')) {
+      // Strict non-guessing deterministic fallback if AI is unavailable or failed
+      if (evaluatedParams.length === 0) {
+        const lowerText = combinedText.toLowerCase();
+
+        // 1. VOC Check
+        let vocVal = 'Keine explizite VOC-Angabe im Dokument';
+        let vocLevel: 1 | 2 | 3 | 4 = 1;
+        if (lowerText.includes('lösemittelfrei') || lowerText.includes('< 1 g/l') || lowerText.includes('<1 g/l')) {
+          vocVal = '< 1 g/l (lösemittelfrei)';
           vocLevel = 4;
-          vocVal = '< 1 g/l (lösemittelfrei gem. VdL-RL01)';
-        } else if (combined.includes('10 g/l') || combined.includes('< 10')) {
+        } else if (lowerText.includes('< 10 g/l') || lowerText.includes('< 10g/l') || lowerText.includes('lösemittelarm')) {
+          vocVal = '< 10 g/l (lösemittelarm)';
           vocLevel = 3;
-          vocVal = '< 10 g/l';
+        } else if (lowerText.includes('voc') || lowerText.includes('g/l')) {
+          const vocMatch = lowerText.match(/voc[^\d]*(\d+[\.,]?\d*)\s*g\/l/i);
+          if (vocMatch) {
+            const num = parseFloat(vocMatch[1].replace(',', '.'));
+            vocVal = `${num} g/l`;
+            vocLevel = num <= 1 ? 4 : num <= 10 ? 3 : num <= 100 ? 2 : 1;
+          } else {
+            vocVal = 'VOC-Gehalt ohne genaue Mengenangabe deklariert';
+            vocLevel = 2;
+          }
         }
 
-        let svhcLevel: 1 | 2 | 3 | 4 = 4;
-        let svhcVal = 'Keine SVHC > 0,1 % (REACH Art. 33 konform)';
-        if (combined.includes('svhc > 0,1')) {
+        // 2. SVHC Check
+        let svhcVal = 'Keine explizite REACH-SVHC Deklaration im Dokument';
+        let svhcLevel: 1 | 2 | 3 | 4 = 1;
+        if (lowerText.includes('svhc > 0,1') || lowerText.includes('svhc > 0.1')) {
+          svhcVal = 'SVHC > 0,1 % w/w (K.O.-Kriterium)';
           svhcLevel = 1;
-          svhcVal = '> 0,1 % (SVHC K.O.)';
+        } else if (lowerText.includes('keine svhc') || lowerText.includes('svhc ≤ 0,1') || lowerText.includes('svhc <= 0,1') || lowerText.includes('reach')) {
+          svhcVal = 'SVHC ≤ 0,1 % w/w (REACH Art. 33 konform)';
+          svhcLevel = 4;
         }
 
-        let labelLevel: 1 | 2 | 3 | 4 = 2;
-        let labelVal = 'Standarddeklaration ohne Umweltzeichen';
-        if (combined.includes('blauer engel') || combined.includes('de-uz 102') || combined.includes('ec1 plus') || combined.includes('ec1+')) {
+        // 3. Certificate Check
+        let labelVal = 'Kein anerkanntes Umweltzeichen im Dokument nachgewiesen';
+        let labelLevel: 1 | 2 | 3 | 4 = 1;
+        if (lowerText.includes('blauer engel') || lowerText.includes('de-uz') || lowerText.includes('ec1 plus') || lowerText.includes('ec1+')) {
+          labelVal = lowerText.includes('blauer engel')
+            ? 'Umweltzeichen Blauer Engel nachgewiesen'
+            : 'EMICODE EC1 PLUS nachgewiesen';
           labelLevel = 4;
-          labelVal = combined.includes('blauer engel') ? 'Umweltzeichen Blauer Engel (DE-UZ 102)' : 'EMICODE EC1 PLUS';
-        } else if (combined.includes('agbb')) {
+        } else if (lowerText.includes('agbb') || lowerText.includes('emicode ec1')) {
+          labelVal = 'AgBB-Prüfkammerbericht / EMICODE EC1 vorliegend';
           labelLevel = 3;
-          labelVal = 'AgBB Prüfkammerbericht vorliegend';
         }
 
-        dgnbParams = [
+        // 4. VOC Test Date / Age Evaluation (Institute requirements: DGNB, AgBB, EMICODE <= 5 years)
+        const dateInput = req.body.vocTestDate || (combinedText.match(/(?:prüfdatum|testdatum|datum der prüfung|ausgestellt am)[^\d]*(\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}|\b20\d\d\b)/i)?.[1]) || '';
+        const testDateEval = evaluateTestDateAge(dateInput);
+
+        evaluatedParams = [
           {
             parameterName: 'VOC-Gehalt / Lösemittelanteil',
             productValue: vocVal,
-            requiredForQS4: dgnbRow.qs4,
+            requiredForQS4: activeRow ? activeRow.qs4 : '≤ 1 g/l',
             achievedLevel: vocLevel,
             isBottleneck: false,
-            status: 'pass',
-            explanation: `Ermittelter VOC-Gehalt: ${vocVal}.`,
+            status: vocLevel >= 3 ? 'pass' : vocLevel === 2 ? 'warning' : 'fail',
+            explanation: vocLevel === 1
+              ? 'Kein ausreichender VOC-Nachweis im Dokument vorhanden.'
+              : `Ermittelter VOC-Status: ${vocVal}.`,
           },
           {
-            parameterName: 'Besonders besorgniserregende Stoffe (SVHC nach REACH)',
+            parameterName: 'Alter & Gültigkeit des VOC-Prüfberichts (Institute: DGNB / AgBB)',
+            productValue: dateInput ? `Prüfdatum: ${dateInput}` : 'Kein Prüfdatum im Bericht angegeben',
+            requiredForQS4: 'Prüfbericht ≤ 5 Jahre alt (DGNB/AgBB-Frist)',
+            achievedLevel: testDateEval.achievedLevel,
+            isBottleneck: false,
+            status: testDateEval.status,
+            explanation: testDateEval.explanation,
+          },
+          {
+            parameterName: 'Besonders besorgniserregende Stoffe (REACH SVHC)',
             productValue: svhcVal,
             requiredForQS4: 'SVHC ≤ 0,1 % w/w',
             achievedLevel: svhcLevel,
             isBottleneck: false,
-            status: 'pass',
-            explanation: 'Prüfung auf Konformität mit der REACH-Kandidatenliste.',
+            status: svhcLevel >= 3 ? 'pass' : 'fail',
+            explanation: svhcLevel === 1
+              ? 'Keine verlässliche REACH-Kandidatenstofferklärung vorgelegt.'
+              : `SVHC-Status: ${svhcVal}.`,
           },
           {
-            parameterName: 'Emissionsnachweis / Umweltzeichen (DE-UZ / EMICODE)',
+            parameterName: 'Umweltzeichen & Emissionsprüfungen',
             productValue: labelVal,
-            requiredForQS4: dgnbRow.qs4,
+            requiredForQS4: 'Blauer Engel oder EMICODE EC1 PLUS',
             achievedLevel: labelLevel,
             isBottleneck: false,
-            status: 'pass',
-            explanation: `Vorliegender Nachweis: ${labelVal}.`,
+            status: labelLevel >= 3 ? 'pass' : 'fail',
+            explanation: labelLevel === 1
+              ? 'Für Höchststufen ist ein anerkanntes Prüfsiegel oder Laborbericht erforderlich.'
+              : `Nachgewiesener Beleg: ${labelVal}.`,
           },
         ];
       }
 
-      const compliance = evaluateDgnbCompliance(dgnbParams, Boolean(hasBauteilekatalog));
+      // Evaluate compliance using strict Schwachstellen-Prinzip & Bauteilekatalog
+      const compliance = evaluateDgnbCompliance(evaluatedParams, Boolean(hasBauteilekatalog));
 
-      evaluations['DGNB'] = {
-        standardCode: 'DGNB',
-        standardName: 'DGNB ENV1.2 (Neubau 2023)',
-        institute: 'Deutsche Gesellschaft für Nachhaltiges Bauen (DGNB)',
-        matchedCriteriaRowNr: `Zeile ${dgnbRow.nr}`,
-        matchedCriteriaTitle: dgnbRow.bauteil,
-        overallRating: `QS ${compliance.overallLevel}`,
+      let ratingText = `QS ${compliance.overallLevel}`;
+      if (code === 'QNG') {
+        ratingText = compliance.overallLevel === 4 ? 'Erfüllt (Premium)' : compliance.overallLevel >= 2 ? 'Erfüllt (Standard)' : 'Nicht erfüllt';
+      } else if (code === 'BNB') {
+        ratingText = `Stufe ${compliance.overallLevel}`;
+      } else if (!['DGNB', 'QNG', 'BNB'].includes(code)) {
+        ratingText = `Stufe ${compliance.overallLevel} (${stdName})`;
+      }
+
+      evaluations[code] = {
+        standardCode: code,
+        standardName: stdName,
+        institute,
+        matchedCriteriaRowNr: criteriaNr,
+        matchedCriteriaTitle: criteriaTitle,
+        overallRating: ratingText,
         overallLevelNum: compliance.overallLevel,
         isCompliant: compliance.overallLevel >= 2,
         bottleneckParameter: compliance.bottleneckParameter?.parameterName,
@@ -903,191 +1005,13 @@ Prüfbericht: ${testReportText || ''}`;
         userExplanation: compliance.userExplanation,
         parameters: compliance.evaluatedParameters,
         recommendation:
-          dgnbRec ||
+          recommendation ||
           (compliance.overallLevel === 4
-            ? 'Alle Anforderungen der höchsten Qualitätsstufe QS 4 sind lückenlos erfüllt.'
+            ? `Alle Anforderungen der Höchststufe für ${stdName} sind vollständig nachgewiesen.`
             : compliance.isBauteilekatalogKO
-            ? 'Für QS 4 muss der materialökologische Bauteilekatalog nebst Bauüberwachungsprotokoll hinterlegt werden.'
-            : `Für QS 4 ist ein Nachweis gemäß "${dgnbRow.qs4}" für den Parameter "${compliance.bottleneckParameter?.parameterName}" beizubringen.`),
+            ? `Für das Erreichen der Höchststufe muss ein materialökologischer Bauteilekatalog vorliegen.`
+            : `Für eine höhere Einstufung bei ${stdName} ist ein Nachweis für den Parameter "${compliance.bottleneckParameter?.parameterName}" einzureichen.`),
       };
-    }
-
-    // 2. Evaluate QNG if selected
-    if (targetStandards.includes('QNG')) {
-      const combined = `${sdbText || ''} ${testReportText || ''}`.toLowerCase();
-      const hasBlauerEngelOrEc1Plus =
-        combined.includes('blauer engel') ||
-        combined.includes('de-uz 102') ||
-        combined.includes('de-uz 113') ||
-        combined.includes('ec1 plus') ||
-        combined.includes('ec1+');
-
-      const isVocLow = combined.includes('lösemittelfrei') || combined.includes('< 1 g/l') || combined.includes('< 10 g/l');
-      const noSvhc = !combined.includes('svhc > 0,1');
-
-      let qngRating = 'Erfüllt (Standard)';
-      let qngCompliant = true;
-      let qngBottleneck = 'Keine Abweichung – Anforderungen für das QNG-Siegel erfüllt.';
-      let qngLevel: 1 | 2 | 3 | 4 = 3;
-
-      if (hasBlauerEngelOrEc1Plus && isVocLow && noSvhc) {
-        qngRating = 'Erfüllt (Premium)';
-        qngLevel = 4;
-        qngBottleneck = 'Höchste Schadstoffanforderungsstufe nach QNG Anhang 3 nachgewiesen.';
-      } else if (!hasBlauerEngelOrEc1Plus && combined.includes('28 g/l')) {
-        qngRating = 'Nicht erfüllt (Basisanforderung verfehlt)';
-        qngCompliant = false;
-        qngLevel = 1;
-        qngBottleneck = 'VOC-Gehalt > 10 g/l bzw. fehlendes Umweltzeichen (DE-UZ 102 / EMICODE EC1 PLUS) für QNG-Förderfähigkeit.';
-      }
-
-      const qngParameters: ParameterEvaluation[] = [
-        {
-          parameterName: 'VOC-Grenzwert nach QNG Anhang 3',
-          productValue: isVocLow ? '< 1 g/l (lösemittelfrei)' : '28 g/l',
-          requiredForQS4: '≤ 1 g/l (VdL-RL01)',
-          achievedLevel: isVocLow ? 4 : 2,
-          isBottleneck: !isVocLow,
-          status: isVocLow ? 'pass' : 'warning',
-          explanation: isVocLow ? 'VOC-Grenzwerte nach QNG Anhang 3 sicher eingehalten.' : 'VOC übersteigt den QNG-Zielgrenzwert.',
-        },
-        {
-          parameterName: 'Ausschluss Schadstoffe & SVHC (REACH)',
-          productValue: noSvhc ? 'SVHC ≤ 0,1 % w/w' : 'SVHC > 0,1 %',
-          requiredForQS4: 'SVHC ≤ 0,1 % w/w',
-          achievedLevel: noSvhc ? 4 : 1,
-          isBottleneck: !noSvhc,
-          status: noSvhc ? 'pass' : 'fail',
-          explanation: noSvhc ? 'Keine SVHC-Kandidatenstoffe enthalten.' : 'Ausschlusskriterium nach QNG verletzt.',
-        },
-        {
-          parameterName: 'Anerkanntes Umweltzeichen / Prüfkammer',
-          productValue: hasBlauerEngelOrEc1Plus ? 'Blauer Engel / EMICODE EC1+' : 'Kein Umweltzeichen',
-          requiredForQS4: 'Blauer Engel (z.B. DE-UZ 102/113) oder EMICODE EC1 PLUS',
-          achievedLevel: hasBlauerEngelOrEc1Plus ? 4 : 2,
-          isBottleneck: !hasBlauerEngelOrEc1Plus,
-          status: hasBlauerEngelOrEc1Plus ? 'pass' : 'fail',
-          explanation: hasBlauerEngelOrEc1Plus ? 'Zertifikat erfolgreich nachgewiesen.' : 'Für das QNG-Siegel ist ein anerkanntes Umweltzeichen zwingend.',
-        },
-      ];
-
-      evaluations['QNG'] = {
-        standardCode: 'QNG',
-        standardName: 'QNG Anhang 3 (Siegel 2024)',
-        institute: 'BMWSB / BiRN (Bundesförderung KfW)',
-        matchedCriteriaRowNr: 'QNG-3.1.1',
-        matchedCriteriaTitle: 'Innenwandfarben & Verlegewerkstoffe',
-        overallRating: qngRating,
-        overallLevelNum: qngLevel,
-        isCompliant: qngCompliant,
-        bottleneckParameter: !hasBlauerEngelOrEc1Plus ? 'Umweltzeichen' : undefined,
-        bottleneckReason: qngBottleneck,
-        userExplanation: qngCompliant
-          ? 'Das Produkt erfüllt die strengen Schadstoffvorgaben des QNG-Siegels und ist für geförderte Bauvorhaben voll zulässig.'
-          : 'Das Produkt verfehlt die QNG-Grenzwerte wegen erhöhtem VOC-Gehalt oder fehlendem Umweltzeichen-Zertifikat.',
-        parameters: qngParameters,
-        recommendation: qngCompliant
-          ? 'QNG-Konformität ist gesichert. Unterlagen können direkt beim QNG-Auditor eingereicht werden.'
-          : 'Ersetzen Sie das Produkt durch eine Variante mit Blauer Engel (DE-UZ 102) oder EMICODE EC1 PLUS, um KfW-Zuschüsse nicht zu gefährden.',
-      };
-    }
-
-    // 3. Evaluate BNB if selected
-    if (targetStandards.includes('BNB')) {
-      const combined = `${sdbText || ''} ${testReportText || ''}`.toLowerCase();
-      const hasBlauerEngel = combined.includes('blauer engel') || combined.includes('de-uz 102') || combined.includes('de-uz 113');
-      const isSolventFree = combined.includes('lösemittelfrei') || combined.includes('< 1 g/l');
-
-      let bnbLevel: 1 | 2 | 3 | 4 = 2;
-      let bnbRating = 'Stufe 2';
-      let bnbBottleneck = 'Stufe 2: Standardanforderung Bundesbau erfüllt.';
-
-      if (hasBlauerEngel && isSolventFree) {
-        bnbLevel = 4;
-        bnbRating = 'Stufe 4 (Exzellenz)';
-        bnbBottleneck = 'Alle Anforderungen der BNB-Höchststufe 4 für Bundesbauten erfüllt.';
-      } else if (isSolventFree || combined.includes('agbb')) {
-        bnbLevel = 3;
-        bnbRating = 'Stufe 3 (Hochwertig)';
-        bnbBottleneck = 'Für Stufe 4 fehlt das anerkannte Umweltzeichen Blauer Engel (DE-UZ 102) oder natureplus.';
-      } else {
-        bnbLevel = 2;
-        bnbRating = 'Stufe 2 (Basis)';
-        bnbBottleneck = 'VOC-Gehalt > 1 g/l begrenzt die Einstufung auf Stufe 2.';
-      }
-
-      const bnbParams: ParameterEvaluation[] = [
-        {
-          parameterName: 'VOC-Gehalt nach VdL-RL01 / Decopaint',
-          productValue: isSolventFree ? '< 1 g/l (lösemittelfrei)' : '28 g/l',
-          requiredForQS4: '≤ 1 g/l (lösemittelfrei)',
-          achievedLevel: isSolventFree ? 4 : 2,
-          isBottleneck: !isSolventFree,
-          status: isSolventFree ? 'pass' : 'warning',
-          explanation: `VOC-Status: ${isSolventFree ? 'Lösemittelfrei' : 'Lösemittelhaltig'}.`,
-        },
-        {
-          parameterName: 'BNB Umweltzeichen / AgBB-Prüfung',
-          productValue: hasBlauerEngel ? 'Blauer Engel (DE-UZ 102) vorhanden' : 'Kein Blauer Engel',
-          requiredForQS4: 'Blauer Engel oder natureplus',
-          achievedLevel: hasBlauerEngel ? 4 : 2,
-          isBottleneck: !hasBlauerEngel,
-          status: hasBlauerEngel ? 'pass' : 'fail',
-          explanation: hasBlauerEngel ? 'Höchststufe nachgewiesen.' : 'DE-UZ fehlt für Stufe 4.',
-        },
-      ];
-
-      evaluations['BNB'] = {
-        standardCode: 'BNB',
-        standardName: 'BNB Neubau 1.1.6 (Bundesbau)',
-        institute: 'Bundesinstitut für Bau-, Stadt- und Raumforschung (BBSR)',
-        matchedCriteriaRowNr: 'BNB-1.1.6.1',
-        matchedCriteriaTitle: 'Innenwandfarben / Lasuren',
-        overallRating: bnbRating,
-        overallLevelNum: bnbLevel,
-        isCompliant: bnbLevel >= 2,
-        bottleneckParameter: !hasBlauerEngel ? 'Umweltzeichen' : undefined,
-        bottleneckReason: bnbBottleneck,
-        userExplanation: `Einstufung nach BNB Kriterium 1.1.6 ergibt ${bnbRating}. ${bnbBottleneck}`,
-        parameters: bnbParams,
-        recommendation: bnbLevel === 4
-          ? 'Perfekt geeignet für Bundesbauten mit BNB Gold-Zertifizierung.'
-          : 'Reichen Sie ein Produkt mit Blauer Engel Zertifikat ein, um BNB Stufe 4 zu erzielen.',
-      };
-    }
-
-    // 4. Any custom standards passed dynamically
-    for (const code of targetStandards) {
-      if (!['DGNB', 'QNG', 'BNB'].includes(code)) {
-        const customStd = standards.find((s: any) => s.code === code);
-        const name = customStd?.name || code;
-        const inst = customStd?.institute || 'Individuelles Prüfinstitut';
-
-        evaluations[code] = {
-          standardCode: code,
-          standardName: name,
-          institute: inst,
-          matchedCriteriaRowNr: 'Zeile 1',
-          matchedCriteriaTitle: 'Geprüftes Bauteil gem. PDF-Scan',
-          overallRating: 'Stufe 3 (Konform)',
-          overallLevelNum: 3,
-          isCompliant: true,
-          bottleneckReason: 'Kriterien des hochgeladenen Leitfadens wurden abgeglichen und als konform bewertet.',
-          userExplanation: `Das Produkt erfüllt die wesentlichen Anforderungen von ${name}.`,
-          parameters: [
-            {
-              parameterName: 'Geprüfter Schadstoffgrenzwert',
-              productValue: 'Konform mit Leitfaden',
-              requiredForQS4: 'Einhaltung Zielgrenzwerte',
-              achievedLevel: 3,
-              isBottleneck: false,
-              status: 'pass',
-              explanation: `Erfolgreich gegen ${name} geprüft.`,
-            },
-          ],
-          recommendation: `Das Produkt kann im Rahmen von ${name} verwendet werden.`,
-        };
-      }
     }
 
     const auditId = `QM-SUSTAIN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -1097,11 +1021,10 @@ Prüfbericht: ${testReportText || ''}`;
       year: 'numeric',
     });
 
-    // Build consolidated result object
     const result: ProductEvaluationResult = {
       productName: identifiedProductName,
       manufacturer: identifiedManufacturer,
-      productType: 'Innenwandfarben / Baustoffe',
+      productType: 'Bauprodukt / Baustoff',
       hasBauteilekatalog: Boolean(hasBauteilekatalog),
       selectedStandardCodes: targetStandards,
       auditMetadata: {
@@ -1115,7 +1038,7 @@ Prüfbericht: ${testReportText || ''}`;
       synopticSummary: {
         bestStandard: targetStandards[0],
         criticalStandard: targetStandards[0],
-        overallRecommendation: `Die Prüfung erfolgte selektiv gegen ${targetStandards.length} Standards (${targetStandards.join(', ')}). Das Produkt zeigt eine geschlossene Konformität über die gewählten Grundlagen.`,
+        overallRecommendation: `Die Prüfung erfolgte auf Basis der übergebenen Unterlagen gegen ${targetStandards.length} Standards (${targetStandards.join(', ')}). Das Schwachstellen-Prinzip wurde konsequent angewendet.`,
       },
       customerReport: {
         title: 'KONFORMITÄTSGUTACHTEN NACHHALTIGKEIT',

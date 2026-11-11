@@ -263,16 +263,39 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           </div>
         </div>
 
-        {/* Selected Standard Description Banner */}
-        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-          <div>
-            <span className="font-bold text-slate-900">{currentStandard.name}</span>
-            <span className="text-slate-500"> · Herausgeber: {currentStandard.institute}</span>
-            <p className="text-slate-600 mt-0.5">{currentStandard.shortDescription}</p>
+      {/* Selected Standard Description Banner */}
+        <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200/80 space-y-2 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-slate-900 text-sm">{currentStandard.name}</span>
+              <span className="text-slate-600"> · Herausgeber: <strong>{currentStandard.institute}</strong></span>
+              <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold text-[11px]">
+                Version {currentStandard.version}
+              </span>
+            </div>
+            <span className="text-emerald-900 font-mono text-[11px] font-bold shrink-0 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
+              {currentStandard.criteriaRows.length} Kriterienzeilen vollumfänglich hinterlegt
+            </span>
           </div>
-          <span className="text-slate-500 font-mono text-[11px] shrink-0">
-            {currentStandard.criteriaRows.length} Kriterienzeilen hinterlegt
-          </span>
+
+          <p className="text-slate-700 leading-relaxed">
+            {currentStandard.shortDescription}
+          </p>
+
+          <div className="pt-2 border-t border-emerald-200/60 grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] text-slate-600">
+            <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-100">
+              <strong className="text-slate-900 block mb-0.5">DGNB ENV1.2 (Neubau 2023)</strong>
+              Extrahiert aus <strong>Seite 17 ff.</strong> der offiziellen DGNB-Richtlinie ("Anlage 1 – Kriterienmatrix V23.3", Zeilen 1–40 für alle Bauteile).
+            </div>
+            <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-100">
+              <strong className="text-slate-900 block mb-0.5">QNG Anhang 3 (Siegel 2024)</strong>
+              Basiert auf den Vorgaben des BMWSB / BiRN ("Vermeidung von Schadstoffen in Baumaterialien" für KfW-Förderungen).
+            </div>
+            <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-100">
+              <strong className="text-slate-900 block mb-0.5">BNB Kriterium 1.1.6 (2023)</strong>
+              Basiert auf den Vorgaben des BBSR für den nachhaltigen Bundesbau ("Risiken für die lokale Umwelt").
+            </div>
+          </div>
         </div>
       </div>
 

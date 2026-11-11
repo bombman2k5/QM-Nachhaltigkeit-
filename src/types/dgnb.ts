@@ -123,6 +123,7 @@ export interface ExtractedDocumentData {
   manufacturer?: string;
   suggestedCriteriaNr?: string;
   vocContent?: string;
+  vocTestDate?: string;
   svhcStatus?: string;
   certificates?: string[];
   hasBauteilekatalog?: boolean;

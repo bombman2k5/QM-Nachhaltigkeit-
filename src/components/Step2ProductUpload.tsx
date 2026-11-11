@@ -35,6 +35,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   const [productName, setProductName] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [selectedRowNr, setSelectedRowNr] = useState('1');
+  const [vocTestDate, setVocTestDate] = useState('');
   const [hasBauteilekatalog, setHasBauteilekatalog] = useState(true);
 
   // Selective Standards Toggle (DGNB, QNG, BNB active by default)
@@ -127,75 +128,35 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         setPendingExtraction(res.data.extracted);
         setIsModalOpen(true);
       } else {
-        const isSdb = documentType === 'sdb';
         const fallbackExtracted: ExtractedDocumentData = {
           documentType,
           filename: file.name,
           productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-          manufacturer: 'Hersteller gemäß ' + (isSdb ? 'Sicherheitsdatenblatt' : 'Prüfbericht'),
+          manufacturer: 'Hersteller im PDF verifizieren',
           suggestedCriteriaNr: '1',
-          vocContent: isSdb ? '< 1 g/l (lösemittelfrei gem. VdL-RL01)' : '< 1 g/l',
-          svhcStatus: 'Keine SVHC > 0,1 % w/w (REACH Art. 33 konform)',
-          certificates: isSdb
-            ? ['EMICODE EC1 PLUS', 'GISCODE M-DF01']
-            : ['Blauer Engel (DE-UZ 102)', 'EMICODE EC1 PLUS', 'AgBB-Prüfbericht'],
+          vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
+          svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+          certificates: [],
           hasBauteilekatalog: true,
-          summarySnippet: `Dokument "${file.name}" erfasst. Relevante bauökologische Parameter zur Bestätigung bereitgestellt.`,
-          fieldQuotes: [
-            {
-              field: 'vocContent',
-              label: 'VOC-Gehalt',
-              value: '< 1 g/l (lösemittelfrei)',
-              quote: 'VOC-Gehalt: < 1 g/l (gemäß technischer Dokumentation)',
-              pageOrSection: isSdb ? 'Abschnitt 9 / 15' : 'Prüfkammerprotokoll',
-              confidence: 'medium',
-            },
-            {
-              field: 'svhcStatus',
-              label: 'SVHC nach REACH',
-              value: 'Keine SVHC > 0,1 %',
-              quote: 'Keine besonders besorgniserregenden Stoffe der REACH-Kandidatenliste > 0,1 % w/w',
-              pageOrSection: isSdb ? 'Abschnitt 3 / 15' : 'Chemische Analyse',
-              confidence: 'medium',
-            },
-          ],
+          summarySnippet: `Dokument "${file.name}" geladen. Bitte überprüfen Sie die Werte im Bestätigungsdialog und tragen Sie fehlende Parameter manuell ein.`,
+          fieldQuotes: [],
         };
         setPendingExtraction(fallbackExtracted);
         setIsModalOpen(true);
       }
     } catch (err: any) {
-      const isSdb = documentType === 'sdb';
       const fallbackExtracted: ExtractedDocumentData = {
         documentType,
         filename: file.name,
         productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-        manufacturer: 'Hersteller gemäß ' + (isSdb ? 'Sicherheitsdatenblatt' : 'Prüfbericht'),
+        manufacturer: 'Hersteller im PDF verifizieren',
         suggestedCriteriaNr: '1',
-        vocContent: isSdb ? '< 1 g/l (lösemittelfrei gem. VdL-RL01)' : '< 1 g/l',
-        svhcStatus: 'Keine SVHC > 0,1 % w/w (REACH Art. 33 konform)',
-        certificates: isSdb
-          ? ['EMICODE EC1 PLUS', 'GISCODE M-DF01']
-          : ['Blauer Engel (DE-UZ 102)', 'EMICODE EC1 PLUS', 'AgBB-Prüfbericht'],
+        vocContent: 'Kein eindeutiger Messwert im PDF erkannt - bitte manuell angeben',
+        svhcStatus: 'Keine explizite SVHC-Deklaration erkannt - bitte manuell angeben',
+        certificates: [],
         hasBauteilekatalog: true,
-        summarySnippet: `Dokument "${file.name}" bereitgestellt. Relevante Parameter zur Bestätigung bereitgestellt.`,
-        fieldQuotes: [
-          {
-            field: 'vocContent',
-            label: 'VOC-Gehalt',
-            value: '< 1 g/l (lösemittelfrei)',
-            quote: 'VOC-Gehalt: < 1 g/l (gemäß technischer Dokumentation)',
-            pageOrSection: isSdb ? 'Abschnitt 9 / 15' : 'Prüfkammerprotokoll',
-            confidence: 'medium',
-          },
-          {
-            field: 'svhcStatus',
-            label: 'SVHC nach REACH',
-            value: 'Keine SVHC > 0,1 %',
-            quote: 'Keine besonders besorgniserregenden Stoffe der REACH-Kandidatenliste > 0,1 % w/w',
-            pageOrSection: isSdb ? 'Abschnitt 3 / 15' : 'Chemische Analyse',
-            confidence: 'medium',
-          },
-        ],
+        summarySnippet: `Dokument "${file.name}" bereitgestellt. Bitte ergänzen Sie fehlende Parameter im Bestätigungsdialog.`,
+        fieldQuotes: [],
       };
       setPendingExtraction(fallbackExtracted);
       setIsModalOpen(true);
@@ -210,6 +171,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     manufacturer: string;
     criteriaRowNr: string;
     vocContent: string;
+    vocTestDate: string;
     svhcStatus: string;
     certificates: string[];
     hasBauteilekatalog: boolean;
@@ -220,12 +182,14 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     if (confirmed.productName) setProductName(confirmed.productName);
     if (confirmed.manufacturer) setManufacturer(confirmed.manufacturer);
     if (confirmed.criteriaRowNr) setSelectedRowNr(confirmed.criteriaRowNr);
+    if (confirmed.vocTestDate) setVocTestDate(confirmed.vocTestDate);
     setHasBauteilekatalog(confirmed.hasBauteilekatalog);
 
     if (confirmed.documentType === 'sdb') {
       const formattedSdb = [
         `PRODUKT: ${confirmed.productName} (${confirmed.manufacturer})`,
         `VOC-GEHALT: ${confirmed.vocContent}`,
+        confirmed.vocTestDate ? `PRÜFDATUM (VOC): ${confirmed.vocTestDate}` : '',
         `REACH SVHC: ${confirmed.svhcStatus}`,
         confirmed.certificates.length > 0 ? `ZERTIFIKATE: ${confirmed.certificates.join(', ')}` : '',
         '',
@@ -240,6 +204,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         `PRÜFBERICHT / ZERTIFIKATE:`,
         confirmed.certificates.length > 0 ? `NACHGEWIESENE ZEICHEN: ${confirmed.certificates.join(' · ')}` : '',
         `VOC-MESSUNG: ${confirmed.vocContent}`,
+        confirmed.vocTestDate ? `PRÜFDATUM / MESSUNG: ${confirmed.vocTestDate}` : '',
         `SCHADSTOFF-BEWERTUNG: ${confirmed.svhcStatus}`,
         '',
         `PRÜFSTELLEN-AUSZUG:`,
@@ -300,6 +265,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           productName,
           manufacturer,
           criteriaRowNr: selectedRowNr,
+          vocTestDate,
           sdbText,
           testReportText,
           hasBauteilekatalog,
@@ -566,7 +532,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
                 Produktname *
@@ -597,7 +563,20 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                Primäre Bauteilgruppe (DGNB ENV1.2)
+                Datum des VOC-Prüfberichts
+              </label>
+              <input
+                type="text"
+                value={vocTestDate}
+                onChange={(e) => setVocTestDate(e.target.value)}
+                placeholder="z. B. 15.05.2023 (DGNB/AgBB ≤ 5 J.)"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Primäre Bauteilgruppe (DGNB)
               </label>
               <select
                 value={selectedRowNr}

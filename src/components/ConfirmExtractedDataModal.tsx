@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CriteriaRow, ExtractedDocumentData } from '../types/dgnb';
+import { evaluateTestDateAge } from '../utils/dgnbEvaluation';
 import {
   ShieldCheck,
   FileText,
@@ -10,6 +11,8 @@ import {
   ExternalLink,
   Layers,
   Sparkles,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 
 interface ConfirmExtractedDataModalProps {
@@ -21,6 +24,7 @@ interface ConfirmExtractedDataModalProps {
     manufacturer: string;
     criteriaRowNr: string;
     vocContent: string;
+    vocTestDate: string;
     svhcStatus: string;
     certificates: string[];
     hasBauteilekatalog: boolean;
@@ -43,6 +47,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
   const [manufacturer, setManufacturer] = useState(data.manufacturer || '');
   const [criteriaRowNr, setCriteriaRowNr] = useState(data.suggestedCriteriaNr || '1');
   const [vocContent, setVocContent] = useState(data.vocContent || '');
+  const [vocTestDate, setVocTestDate] = useState(data.vocTestDate || '');
   const [svhcStatus, setSvhcStatus] = useState(data.svhcStatus || '');
   const [certificates, setCertificates] = useState<string[]>(data.certificates || []);
   const [certificateInput, setCertificateInput] = useState('');
@@ -68,6 +73,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
       manufacturer: manufacturer.trim(),
       criteriaRowNr,
       vocContent: vocContent.trim(),
+      vocTestDate: vocTestDate.trim(),
       svhcStatus: svhcStatus.trim(),
       certificates,
       hasBauteilekatalog,
@@ -75,6 +81,8 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
       documentType: data.documentType,
     });
   };
+
+  const testAgeEval = evaluateTestDateAge(vocTestDate);
 
   const getQuoteForField = (fieldName: string) => {
     return data.fieldQuotes?.find((q) => q.field === fieldName);
@@ -203,8 +211,8 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
             </select>
           </div>
 
-          {/* Environmental Parameters: VOC & SVHC */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Environmental Parameters: VOC, Test Date & SVHC */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* VOC Content */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
               <div className="flex items-center justify-between">
@@ -228,6 +236,56 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                   <div>
                     <strong className="text-slate-800 text-[10px]">Belegfundstelle:</strong>{' '}
                     <span>„{getQuoteForField('vocContent')?.quote}“</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* VOC Test Report Date */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-slate-800 uppercase tracking-wider text-[11px] flex items-center space-x-1">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-700 inline" />
+                  <span>Prüfdatum (VOC)</span>
+                </label>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {getQuoteForField('vocTestDate')?.pageOrSection || 'Laborbericht'}
+                </span>
+              </div>
+              <input
+                type="text"
+                value={vocTestDate}
+                onChange={(e) => setVocTestDate(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="z.B. 15.05.2023 oder 2023..."
+              />
+
+              {/* Live Institute Age Check Indicator */}
+              <div className="pt-0.5">
+                {testAgeEval.status === 'pass' ? (
+                  <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    <span>Gültig (&le; 5 Jahre, DGNB/AgBB)</span>
+                  </span>
+                ) : testAgeEval.status === 'warning' ? (
+                  <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md border border-amber-300">
+                    <AlertCircle className="w-3 h-3 text-amber-600" />
+                    <span>&gt; 5 Jahre (Rezeptur-Bestätigung nötig)</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-rose-800 bg-rose-100/80 px-2 py-0.5 rounded-md border border-rose-300">
+                    <AlertCircle className="w-3 h-3 text-rose-600" />
+                    <span>&gt; 10 Jahre / Abgelaufen</span>
+                  </span>
+                )}
+              </div>
+
+              {getQuoteForField('vocTestDate')?.quote && (
+                <div className="flex items-start space-x-1.5 text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
+                  <Quote className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-slate-800 text-[10px]">Belegfundstelle:</strong>{' '}
+                    <span>„{getQuoteForField('vocTestDate')?.quote}“</span>
                   </div>
                 </div>
               )}

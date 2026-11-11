@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateDgnbCompliance, isEmailAllowed } from './dgnbEvaluation';
+import { evaluateDgnbCompliance, isEmailAllowed, evaluateTestDateAge } from './dgnbEvaluation';
 import { ParameterEvaluation } from '../types/dgnb';
 
 test('isEmailAllowed correctly matches whitelisted emails case-insensitively and recognizes brian.lackmann@kaubit.de', () => {
@@ -146,4 +146,31 @@ test('safeFetchJson successfully parses valid JSON responses', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('evaluateTestDateAge checks test report age against DGNB/AgBB institute rules', () => {
+  // Test report <= 5 years old (e.g. 2023 when current year is 2026) -> Level 4 Pass
+  const fresh = evaluateTestDateAge('15.05.2023', 2026);
+  assert.equal(fresh.achievedLevel, 4);
+  assert.equal(fresh.status, 'pass');
+  assert.equal(fresh.ageYears, 3);
+
+  // Test report 5-10 years old (e.g. 2019 when current year is 2026) -> Level 2 Warning
+  const medium = evaluateTestDateAge('10.02.2019', 2026);
+  assert.equal(medium.achievedLevel, 2);
+  assert.equal(medium.status, 'warning');
+  assert.equal(medium.ageYears, 7);
+
+  // Test report > 10 years old (e.g. 2012 when current year is 2026) -> Level 1 Fail / Expired KO
+  const expired = evaluateTestDateAge('2012', 2026);
+  assert.equal(expired.achievedLevel, 1);
+  assert.equal(expired.status, 'fail');
+  assert.equal(expired.ageYears, 14);
+
+  // Missing date -> Warning Level 2
+  const missing = evaluateTestDateAge('', 2026);
+  assert.equal(missing.achievedLevel, 2);
+  assert.equal(missing.status, 'warning');
+  assert.equal(missing.ageYears, null);
+});
+
 

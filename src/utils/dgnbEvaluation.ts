@@ -45,6 +45,71 @@ export function isEmailAllowed(email: string, allowedEmails: string[] = []): boo
   });
 }
 
+/**
+ * Evaluates the age of a VOC test report / certificate against institute requirements (DGNB, AgBB, EMICODE, QNG, BNB).
+ * Standard Institute Rules:
+ * - <= 5 years old: Fully valid (Quality Level 4 / Pass)
+ * - 5 to 10 years old: Warning / Demoted (Requires written manufacturer confirmation of unchanged formulation)
+ * - > 10 years old or invalid: Expired KO (Quality Level 1 / Fail)
+ * - Missing date: Warning / Demoted (Quality Level 2)
+ */
+export function evaluateTestDateAge(
+  dateStr?: string,
+  currentYear: number = new Date().getFullYear()
+): {
+  ageYears: number | null;
+  achievedLevel: QualityLevel;
+  status: 'pass' | 'warning' | 'fail';
+  explanation: string;
+} {
+  if (!dateStr || !dateStr.trim() || dateStr.toLowerCase().includes('kein') || dateStr.toLowerCase().includes('fehlt')) {
+    return {
+      ageYears: null,
+      achievedLevel: 2,
+      status: 'warning',
+      explanation:
+        'Kein Prüfberichtsdatum für die VOC-Emissionsmessung angegeben. Gemäß Institutsvorgaben (DGNB/AgBB) dürfen Prüfberichte maximal 5 Jahre alt sein (bzw. max. 10 Jahre mit Rezepturbestätigung).',
+    };
+  }
+
+  // Find 4-digit year pattern (e.g. 2023 in "15.05.2023" or "2023-04-10" or "Mai 2021")
+  const yearMatch = dateStr.match(/\b(19\d\d|20\d\d)\b/);
+  if (!yearMatch) {
+    return {
+      ageYears: null,
+      achievedLevel: 2,
+      status: 'warning',
+      explanation: `Das übergebene Prüfdatum "${dateStr}" konnte keinem Jahr zugeordnet werden. DGNB/AgBB fordern einen gültigen Nachweis ≤ 5 Jahre.`,
+    };
+  }
+
+  const testYear = parseInt(yearMatch[1], 10);
+  const ageYears = Math.max(0, currentYear - testYear);
+
+  if (ageYears <= 5) {
+    return {
+      ageYears,
+      achievedLevel: 4,
+      status: 'pass',
+      explanation: `Gültiger Prüfbericht: Datum "${dateStr}" (vor ca. ${ageYears} Jahr(en)). Erfüllt die DGNB/AgBB/EMICODE 5-Jahres-Frist ohne Einschränkung.`,
+    };
+  } else if (ageYears <= 10) {
+    return {
+      ageYears,
+      achievedLevel: 2,
+      status: 'warning',
+      explanation: `Warnung (Prüfbericht > 5 Jahre): Datum "${dateStr}" (vor ca. ${ageYears} Jahren). Laut DGNB/AgBB ist eine schriftliche Herstellerexplikation zur unveränderten Rezeptur erforderlich.`,
+    };
+  } else {
+    return {
+      ageYears,
+      achievedLevel: 1,
+      status: 'fail',
+      explanation: `K.O.-Kriterium (Prüfbericht abgelaufen): Datum "${dateStr}" (vor ca. ${ageYears} Jahren). Prüfberichte älter als 10 Jahre werden von den Instituten als veraltet und ungültig eingestuft.`,
+    };
+  }
+}
+
 
 /**
  * Evaluates product compliance based on the DGNB Schwachstellen-Prinzip (K.O.-Verfahren)
