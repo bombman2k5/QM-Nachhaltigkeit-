@@ -8,6 +8,7 @@ import {
   where,
   orderBy,
   limit,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { ProductEvaluationResult } from '../types/dgnb';
@@ -172,3 +173,50 @@ export async function getAllSavedEvaluationsFromDb(): Promise<StoredProductRecor
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 }
+
+/**
+ * Deletes a stored product evaluation record and its certificate data from LocalStorage & Firestore
+ */
+export async function deleteProductEvaluationFromDb(
+  recordId: string,
+  productName?: string,
+  manufacturer?: string
+): Promise<boolean> {
+  const searchKey = productName ? normalizeProductKey(productName, manufacturer) : null;
+
+  // 1. Delete from LocalStorage
+  try {
+    const existingRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (existingRaw) {
+      const existingList: StoredProductRecord[] = JSON.parse(existingRaw);
+      const filtered = existingList.filter((item) => {
+        if (item.id === recordId) return false;
+        if (searchKey && normalizeProductKey(item.productName, item.manufacturer) === searchKey) return false;
+        return true;
+      });
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(filtered));
+    }
+  } catch (err) {
+    console.warn('LocalStorage delete warning:', err);
+  }
+
+  // 2. Delete from Firestore
+  try {
+    if (recordId) {
+      const docRef = doc(db, 'audits', recordId);
+      await deleteDoc(docRef);
+    }
+    if (productName && productName.trim()) {
+      const auditsRef = collection(db, 'audits');
+      const q = query(auditsRef, where('productName', '==', productName.trim()));
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+      await Promise.all(deletePromises);
+    }
+    return true;
+  } catch (err) {
+    console.warn('Firestore delete warning:', err);
+    return false;
+  }
+}
+

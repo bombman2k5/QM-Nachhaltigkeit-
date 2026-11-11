@@ -205,7 +205,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
             >
               {criteriaRows.map((row) => (
                 <option key={row.id} value={row.nr}>
-                  Zeile {row.nr}: {row.bauteil} ({row.betrachteteStoffe})
+                  Nr. {row.nr}: {row.bauteil} ({row.betrachteteStoffe})
                 </option>
               ))}
             </select>

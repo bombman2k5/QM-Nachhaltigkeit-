@@ -26,6 +26,8 @@ import {
   saveProductEvaluationToDb,
   findProductEvaluationInDb,
   getAllSavedEvaluationsFromDb,
+  deleteProductEvaluationFromDb,
+  normalizeProductKey,
   StoredProductRecord,
 } from '../utils/productDbService';
 
@@ -105,6 +107,60 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       console.warn('DB check error:', e);
     } finally {
       setIsCheckingDb(false);
+    }
+  };
+
+  // Delete saved product record & certificate from DB & local storage
+  const handleDeleteRecord = async (rec: StoredProductRecord) => {
+    if (
+      window.confirm(
+        `Möchten Sie das Produkt "${rec.productName}" (${rec.manufacturer}) und das zugehörige Zertifikat wirklich aus der Datenbank löschen?\n\nDadurch können Sie es mit einer anderen Bauteilgruppe oder korrigierten Werten neu scannen.`
+      )
+    ) {
+      await deleteProductEvaluationFromDb(rec.id, rec.productName, rec.manufacturer);
+      setSavedProducts((prev) => prev.filter((item) => item.id !== rec.id));
+
+      // Clear cache hit if it matches current deleted product
+      if (
+        dbHitResult &&
+        normalizeProductKey(dbHitResult.productName, dbHitResult.manufacturer) ===
+          normalizeProductKey(rec.productName, rec.manufacturer)
+      ) {
+        setDbHitResult(null);
+        setDbHitSource(null);
+      }
+
+      setConfirmationNotice(
+        `Produkt "${rec.productName}" und zugehörige Zertifikatseinträge wurden erfolgreich aus der Datenbank gelöscht.`
+      );
+    }
+  };
+
+  // Delete cached DB hit directly from cache hit banner
+  const handleDeleteDbHit = async () => {
+    if (!dbHitResult) return;
+    const prodName = dbHitResult.productName;
+    const mfr = dbHitResult.manufacturer;
+    const auditId = dbHitResult.auditMetadata?.auditId || '';
+
+    if (
+      window.confirm(
+        `Möchten Sie die gespeicherte Bewertung für "${prodName}" löschen?\n\nDies ermöglicht es Ihnen, das Produkt mit geänderten Parametern (z.B. primärer Bauteilgruppe Nr. 1-48) neu zu scannen und zu bewerten.`
+      )
+    ) {
+      await deleteProductEvaluationFromDb(auditId, prodName, mfr);
+      setSavedProducts((prev) =>
+        prev.filter(
+          (item) =>
+            item.id !== auditId &&
+            normalizeProductKey(item.productName, item.manufacturer) !== normalizeProductKey(prodName, mfr)
+        )
+      );
+      setDbHitResult(null);
+      setDbHitSource(null);
+      setConfirmationNotice(
+        `Bisherige Bewertung & Zertifikat für "${prodName}" wurden gelöscht. Sie können die Produktgruppe nun ändern und neu prüfen.`
+      );
     }
   };
 
@@ -424,19 +480,30 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                       <p className="text-[11px] text-slate-400 truncate">{rec.manufacturer}</p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (parsedResult) {
-                          onAnalysisComplete(parsedResult);
-                          setShowDbLibrary(false);
-                        }
-                      }}
-                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center space-x-1 cursor-pointer transition-colors"
-                    >
-                      <span>Bewertung & Zertifikat erneut laden</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center space-x-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (parsedResult) {
+                            onAnalysisComplete(parsedResult);
+                            setShowDbLibrary(false);
+                          }
+                        }}
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center space-x-1 cursor-pointer transition-colors"
+                      >
+                        <span>Erneut laden</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRecord(rec)}
+                        className="p-2 bg-rose-900/40 hover:bg-rose-700 text-rose-300 hover:text-white rounded-lg text-xs font-semibold flex items-center justify-center space-x-1 cursor-pointer transition-colors border border-rose-800/60"
+                        title="Produkt & Zertifikat aus Datenbank löschen"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="sr-only sm:not-sr-only">Löschen</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -447,7 +514,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
 
       {/* DATABASE CACHE HIT ALERT BANNER */}
       {dbHitResult && (
-        <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-900 to-slate-900 text-white shadow-md border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-900 via-slate-900 to-slate-900 text-white shadow-md border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start space-x-3">
             <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
               <Database className="w-6 h-6 animate-pulse" />
@@ -462,12 +529,12 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                 Geprüftes Produkt: "{dbHitResult.productName}" ({dbHitResult.manufacturer})
               </h3>
               <p className="text-xs text-slate-300 mt-1">
-                Dieses Produkt wurde bereits nach <strong>{dbHitResult.selectedStandardCodes?.join(', ')}</strong> bewertet. Sie können die fertige Bewertung sofort ohne KI-Aufruf laden (0 Tokens, 0s Wartezeit).
+                Dieses Produkt wurde bereits nach <strong>{dbHitResult.selectedStandardCodes?.join(', ')}</strong> bewertet. Sie können die fertige Bewertung sofort laden oder löschen, um die Bauteilgruppe neu zu wählen.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => onAnalysisComplete(dbHitResult)}
@@ -475,6 +542,15 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
             >
               <span>Gespeicherte Bewertung laden</span>
               <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteDbHit}
+              className="px-3.5 py-2.5 bg-rose-600/90 hover:bg-rose-600 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 cursor-pointer transition-all border border-rose-500/50"
+              title="Fehlerhafte Zuordnung oder altes Zertifikat löschen und neu scannen"
+            >
+              <Trash2 className="w-4 h-4 text-rose-200" />
+              <span>Löschen &amp; neu scannen</span>
             </button>
           </div>
         </div>
@@ -773,7 +849,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
               >
                 {primaryStandard.criteriaRows.map((row) => (
                   <option key={row.id} value={row.nr}>
-                    Zeile {row.nr}: {row.bauteil}
+                    Nr. {row.nr}: {row.bauteil}
                   </option>
                 ))}
               </select>

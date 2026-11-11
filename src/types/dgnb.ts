@@ -28,6 +28,9 @@ export interface CriteriaRow {
   artDokumentation: string;
   geltungsbereich: string;
   kategorie?: string;
+  dgnbRefNr?: string;
+  qngRefNr?: string;
+  bnbRefNr?: string;
 }
 
 export interface SustainabilityStandard {

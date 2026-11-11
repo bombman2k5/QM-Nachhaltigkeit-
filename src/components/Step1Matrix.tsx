@@ -329,7 +329,7 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900 text-white border-b border-slate-700">
-                <th className="py-3 px-3 w-16 font-mono font-bold text-center">Zeile</th>
+                <th className="py-3 px-3 w-16 font-mono font-bold text-center">Nr.</th>
                 <th className="py-3 px-4 w-60 font-bold">Bauteil / Produktgruppe</th>
                 <th className="py-3 px-4 w-48 font-bold">Betrachtete Stoffe & Norm</th>
                 <th className="py-3 px-3 font-semibold bg-slate-800/80">Stufe 1 (Basis)</th>
@@ -354,6 +354,23 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
                         {row.anwendungsbereich}
                       </div>
                     )}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {row.qngRefNr && (
+                        <span className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 font-mono font-medium border border-indigo-200">
+                          QNG Ref: {row.qngRefNr}
+                        </span>
+                      )}
+                      {row.bnbRefNr && (
+                        <span className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 font-mono font-medium border border-blue-200">
+                          BNB Ref: {row.bnbRefNr}
+                        </span>
+                      )}
+                      {row.dgnbRefNr && (
+                        <span className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 font-mono font-medium border border-emerald-200">
+                          DGNB Ref: {row.dgnbRefNr}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-slate-700 text-[11px] leading-relaxed">
                     <div>{row.betrachteteStoffe}</div>

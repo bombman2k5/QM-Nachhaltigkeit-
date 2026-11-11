@@ -12,7 +12,9 @@ import {
   Check,
   XCircle,
   HelpCircle,
+  Trash2,
 } from 'lucide-react';
+import { deleteProductEvaluationFromDb } from '../utils/productDbService';
 
 interface Step3EvaluationProps {
   result: ProductEvaluationResult;
@@ -46,6 +48,18 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
 
   const currentEval = result.standardsEvaluations[activeTabStandard] || Object.values(result.standardsEvaluations)[0];
 
+  const handleDeleteCurrentResult = async () => {
+    if (
+      window.confirm(
+        `Möchten Sie diese Bewertung für "${result.productName}" (${result.manufacturer}) aus der Datenbank löschen?\n\nDadurch können Sie in Schritt 2 z.B. eine andere Bauteilgruppe wählen oder neue PDF-Dokumente hochladen.`
+      )
+    ) {
+      const auditId = result.auditMetadata?.auditId || '';
+      await deleteProductEvaluationFromDb(auditId, result.productName, result.manufacturer);
+      onBackToStep2();
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Product Summary Header */}
@@ -62,7 +76,15 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              onClick={handleDeleteCurrentResult}
+              className="py-2.5 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-colors"
+              title="Diese Bewertung löschen, um falsche Bauteilgruppe oder Zertifikat zu korrigieren"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Bewertung löschen</span>
+            </button>
             <button
               onClick={onBackToStep2}
               className="py-2.5 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 cursor-pointer"
