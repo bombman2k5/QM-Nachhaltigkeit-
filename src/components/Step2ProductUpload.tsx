@@ -16,7 +16,18 @@ import {
   Check,
   Zap,
   Info,
+  Database,
+  Search,
+  Clock,
+  History,
+  BookOpen,
 } from 'lucide-react';
+import {
+  saveProductEvaluationToDb,
+  findProductEvaluationInDb,
+  getAllSavedEvaluationsFromDb,
+  StoredProductRecord,
+} from '../utils/productDbService';
 
 interface Step2ProductUploadProps {
   standards: SustainabilityStandard[];
@@ -58,6 +69,44 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   // Modal review state for AI extraction
   const [pendingExtraction, setPendingExtraction] = useState<ExtractedDocumentData | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Database Caching & Library states
+  const [dbHitResult, setDbHitResult] = useState<ProductEvaluationResult | null>(null);
+  const [dbHitSource, setDbHitSource] = useState<'firestore' | 'local' | null>(null);
+  const [isCheckingDb, setIsCheckingDb] = useState(false);
+  const [savedProducts, setSavedProducts] = useState<StoredProductRecord[]>([]);
+  const [showDbLibrary, setShowDbLibrary] = useState(false);
+
+  // Fetch stored products library on component mount
+  React.useEffect(() => {
+    getAllSavedEvaluationsFromDb().then((records) => {
+      setSavedProducts(records);
+    });
+  }, []);
+
+  // Check DB when product name or manufacturer is typed/extracted
+  const checkProductInDatabase = async (name: string, mfr?: string) => {
+    if (!name || name.trim().length < 2) {
+      setDbHitResult(null);
+      setDbHitSource(null);
+      return;
+    }
+    setIsCheckingDb(true);
+    try {
+      const match = await findProductEvaluationInDb(name, mfr);
+      if (match) {
+        setDbHitResult(match.result);
+        setDbHitSource(match.source);
+      } else {
+        setDbHitResult(null);
+        setDbHitSource(null);
+      }
+    } catch (e) {
+      console.warn('DB check error:', e);
+    } finally {
+      setIsCheckingDb(false);
+    }
+  };
 
   // Hidden file inputs
   const sdbInputRef = useRef<HTMLInputElement>(null);
@@ -220,6 +269,11 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     );
     setIsModalOpen(false);
     setPendingExtraction(null);
+
+    // Auto-check DB if product already exists in database
+    if (confirmed.productName) {
+      checkProductInDatabase(confirmed.productName, confirmed.manufacturer);
+    }
   };
 
   const handleRunEvaluation = async (e: React.FormEvent) => {
@@ -280,6 +334,11 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         throw new Error(res.error || res.data?.message || 'Analysefehler bei der Konformitätsprüfung');
       }
 
+      // Save result to Firestore & LocalStorage for zero-token future lookup
+      await saveProductEvaluationToDb(res.data.result, 'auditor-user', userEmail);
+      const updatedList = await getAllSavedEvaluationsFromDb();
+      setSavedProducts(updatedList);
+
       onAnalysisComplete(res.data.result);
     } catch (err: any) {
       setErrorMessage('Fehler bei der Konformitätsprüfung: ' + (err.message || String(err)));
@@ -293,14 +352,133 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
-        <h1 className="text-xl font-bold text-slate-900">
-          Schritt 2: Produktdaten & KI-Dokumenten-Upload
-        </h1>
-        <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-          Laden Sie Sicherheitsdatenblätter (SDB) und Labor-Prüfberichte als PDF hoch. Die KI extrahiert die relevanten baustoffökologischen Parameter (VOC, SVHC, Zertifikate), die Sie vor der Übernahme in einem Prüfdialog kontrollieren und freigeben.
-        </p>
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 flex items-center space-x-2">
+            <span>Schritt 2: Produktdaten & KI-Dokumenten-Upload</span>
+          </h1>
+          <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+            Laden Sie Sicherheitsdatenblätter (SDB) und Labor-Prüfberichte als PDF hoch. Die KI extrahiert die relevanten baustoffökologischen Parameter (VOC, SVHC, Zertifikate), die Sie vor der Übernahme kontrollieren und freigeben.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowDbLibrary(!showDbLibrary)}
+          className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shrink-0 transition-all cursor-pointer shadow-xs"
+        >
+          <Database className="w-4 h-4 text-emerald-400" />
+          <span>Produkte-Datenbank ({savedProducts.length})</span>
+        </button>
       </div>
+
+      {/* DATABASE PRODUCT LIBRARY DRAWER / MODAL */}
+      {showDbLibrary && (
+        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl space-y-4 border border-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center space-x-2">
+              <BookOpen className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-100">
+                Geprüfte Bauprodukte in der Datenbank (Token- & Zeitergänzung)
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDbLibrary(false)}
+              className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+            >
+              Schließen
+            </button>
+          </div>
+
+          {savedProducts.length === 0 ? (
+            <p className="text-xs text-slate-400 py-4 text-center">
+              Noch keine Produkte in der Datenbank gespeichert. Sobald Sie das erste Produkt prüfen, wird die Bewertung hier schreibgeschützt hinterlegt.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {savedProducts.map((rec) => {
+                let parsedResult: ProductEvaluationResult | null = null;
+                try {
+                  parsedResult = JSON.parse(rec.encryptedPayload);
+                } catch (e) {}
+
+                return (
+                  <div
+                    key={rec.id}
+                    className="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-emerald-500 transition-colors"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                          QS {rec.qualityLevel} (DGNB)
+                        </span>
+                        <span className="text-[10px] text-slate-400 flex items-center space-x-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{new Date(rec.createdAt).toLocaleDateString('de-DE')}</span>
+                        </span>
+                      </div>
+                      <h3 className="text-xs font-bold text-slate-100 mt-2 truncate">
+                        {rec.productName}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 truncate">{rec.manufacturer}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (parsedResult) {
+                          onAnalysisComplete(parsedResult);
+                          setShowDbLibrary(false);
+                        }
+                      }}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center space-x-1 cursor-pointer transition-colors"
+                    >
+                      <span>Bewertung & Zertifikat erneut laden</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* DATABASE CACHE HIT ALERT BANNER */}
+      {dbHitResult && (
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-900 to-slate-900 text-white shadow-md border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start space-x-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+              <Database className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  ⚡ Datenbank-Treffer gefunden ({dbHitSource === 'firestore' ? 'Google Firestore DB' : 'Lokaler Cache'})
+                </span>
+              </div>
+              <h3 className="text-sm font-bold text-white mt-0.5">
+                Geprüftes Produkt: "{dbHitResult.productName}" ({dbHitResult.manufacturer})
+              </h3>
+              <p className="text-xs text-slate-300 mt-1">
+                Dieses Produkt wurde bereits nach <strong>{dbHitResult.selectedStandardCodes?.join(', ')}</strong> bewertet. Sie können die fertige Bewertung sofort ohne KI-Aufruf laden (0 Tokens, 0s Wartezeit).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => onAnalysisComplete(dbHitResult)}
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-2 cursor-pointer transition-all shadow-sm"
+            >
+              <span>Gespeicherte Bewertung laden</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Selective Standards Filter Box */}
       <div className="bg-white rounded-2xl border border-emerald-200 p-5 shadow-xs space-y-3">
@@ -541,7 +719,12 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                 type="text"
                 required
                 value={productName}
-                onChange={(e) => setProductName(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setProductName(val);
+                  checkProductInDatabase(val, manufacturer);
+                }}
+                onBlur={() => checkProductInDatabase(productName, manufacturer)}
                 placeholder="z. B. Öko-Innenfarbe Matt"
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
@@ -555,7 +738,12 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                 type="text"
                 required
                 value={manufacturer}
-                onChange={(e) => setManufacturer(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setManufacturer(val);
+                  checkProductInDatabase(productName, val);
+                }}
+                onBlur={() => checkProductInDatabase(productName, manufacturer)}
                 placeholder="z. B. Baustoff-Hersteller GmbH"
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />

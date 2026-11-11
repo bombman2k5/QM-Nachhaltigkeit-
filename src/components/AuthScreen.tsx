@@ -1,31 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
   signOut,
   signInWithPopup,
   GoogleAuthProvider,
+  onAuthStateChanged,
+  User,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { safeFetchJson } from '../utils/safeFetch';
-import { isEmailAllowed, CORE_ALLOWED_EMAILS } from '../utils/dgnbEvaluation';
 import {
   Shield,
   KeyRound,
-  Mail,
   AlertCircle,
   CheckCircle2,
   Lock,
   ArrowRight,
   Eye,
   EyeOff,
-  UserPlus,
-  LogIn,
   RefreshCw,
   LogOut,
-  ShieldAlert,
   HelpCircle,
 } from 'lucide-react';
 import {
@@ -36,69 +30,126 @@ import {
 
 interface AuthScreenProps {
   onLoginSuccess: (email: string, sessionToken: string, encryptionKey: CryptoKey) => void;
-  defaultEmail?: string;
+  currentUser?: User | null;
 }
 
-type AuthMode = 'login' | 'register' | 'forgot_password';
-type ScreenStage = 'email_login' | 'passphrase_mask' | 'access_denied';
+type ScreenStage = 'google_login' | 'passphrase_mask';
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   onLoginSuccess,
-  defaultEmail = 'brian.lackmann@kaubit.de',
+  currentUser: initialUser,
 }) => {
   // Screen Stage Management
-  const [stage, setStage] = useState<ScreenStage>('email_login');
-  const [authMode, setAuthMode] = useState<AuthMode>('login');
-
-  // Whitelist & Config state dynamically fetched from server
-  const [serverAllowedEmails, setServerAllowedEmails] = useState<string[]>(CORE_ALLOWED_EMAILS);
-  const [activeConfigVar, setActiveConfigVar] = useState<string>('config');
-
-  // Stage 1: Firebase Auth credentials
-  const [email, setEmail] = useState(defaultEmail);
-  const [password, setPassword] = useState('QM-Tool@Audit2024!');
-  const [showPassword, setShowPassword] = useState(false);
+  const [stage, setStage] = useState<ScreenStage>('google_login');
+  const [user, setUser] = useState<User | null>(initialUser || auth.currentUser);
 
   // Authenticated state awaiting passphrase
-  const [authenticatedEmail, setAuthenticatedEmail] = useState('');
-  const [idToken, setIdToken] = useState('');
-  const [hasPassphraseConfigured, setHasPassphraseConfigured] = useState(false);
-  const [saltHex, setSaltHex] = useState('');
-  const [verifierHex, setVerifierHex] = useState('');
+  const [authenticatedEmail, setAuthenticatedEmail] = useState<string>(
+    initialUser?.email || auth.currentUser?.email || ''
+  );
+  const [idToken, setIdToken] = useState<string>('');
+  const [hasPassphraseConfigured, setHasPassphraseConfigured] = useState<boolean>(false);
+  const [saltHex, setSaltHex] = useState<string>('');
+  const [verifierHex, setVerifierHex] = useState<string>('');
 
-  // Stage 2: Passphrase Mask
-  const [passphrase, setPassphrase] = useState('');
-  const [confirmPassphrase, setConfirmPassphrase] = useState('');
-  const [showPassphrase, setShowPassphrase] = useState(false);
-  const [failedAttempts, setFailedAttempts] = useState(0);
+  // Passphrase Mask State
+  const [passphrase, setPassphrase] = useState<string>('');
+  const [confirmPassphrase, setConfirmPassphrase] = useState<string>('');
+  const [showPassphrase, setShowPassphrase] = useState<boolean>(false);
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
 
   // UI status
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Query server for live whitelist from environment variable (e.g. config or ALLOWED_EMAILS)
+  // Listen to Auth State and prepare Passphrase stage if signed in via Google
   useEffect(() => {
-    let isMounted = true;
-    safeFetchJson<{
-      allowedEmails?: string[];
-      configDetected?: boolean;
-      activeVarName?: string;
-    }>('/api/auth/status').then((res) => {
-      if (isMounted && res.ok && res.data?.allowedEmails) {
-        setServerAllowedEmails(res.data.allowedEmails);
-        if (res.data.activeVarName) {
-          setActiveConfigVar(res.data.activeVarName);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        const currentEmail = (currentUser.email || '').trim();
+        setAuthenticatedEmail(currentEmail);
+        try {
+          const token = await currentUser.getIdToken();
+          setIdToken(token);
+          await preparePassphraseStage(currentUser, currentEmail, token);
+        } catch (err) {
+          console.warn('Token fetch note:', err);
         }
+      } else {
+        setUser(null);
+        setAuthenticatedEmail('');
+        setStage('google_login');
       }
     });
-    return () => {
-      isMounted = false;
-    };
+
+    return () => unsubscribe();
   }, []);
 
+  // Prepare Passphrase configuration & verifier
+  const preparePassphraseStage = async (currentUser: User, currentEmail: string, token: string) => {
+    let hasConfigured = false;
+    let activeSalt = '';
+    let activeVerifier = '';
+
+    // 1. Fetch from Firestore user document
+    try {
+      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+      if (userDoc.exists()) {
+        const udata = userDoc.data();
+        if (udata?.hasPassphrase && udata?.passphraseSalt && udata?.passphraseVerifier) {
+          hasConfigured = true;
+          activeSalt = udata.passphraseSalt;
+          activeVerifier = udata.passphraseVerifier;
+        }
+      }
+    } catch (fsErr) {
+      console.warn('Firestore fetch note:', fsErr);
+    }
+
+    // 2. Fallback to localStorage
+    if (!hasConfigured) {
+      const localSalt = localStorage.getItem(`qm_salt_${currentUser.uid}`);
+      const localVerifier = localStorage.getItem(`qm_ver_${currentUser.uid}`);
+      if (localSalt && localVerifier) {
+        hasConfigured = true;
+        activeSalt = localSalt;
+        activeVerifier = localVerifier;
+      }
+    }
+
+    // 3. Fallback to server verification
+    if (!hasConfigured) {
+      const verifyRes = await safeFetchJson<{
+        success: boolean;
+        hasPassphraseConfigured?: boolean;
+        saltHex?: string | null;
+        verifierHex?: string | null;
+      }>('/api/auth/verify-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ idToken: token, email: currentEmail }),
+      });
+
+      if (verifyRes.ok && verifyRes.data?.hasPassphraseConfigured) {
+        hasConfigured = true;
+        activeSalt = verifyRes.data.saltHex || '';
+        activeVerifier = verifyRes.data.verifierHex || '';
+      }
+    }
+
+    setHasPassphraseConfigured(hasConfigured);
+    setSaltHex(activeSalt);
+    setVerifierHex(activeVerifier);
+    setStage('passphrase_mask');
+  };
+
   // --------------------------------------------------------------------------
-  // GOOGLE ONE-CLICK AUTHENTICATION
+  // GOOGLE AUTHENTICATION (STAGE 1)
   // --------------------------------------------------------------------------
   const handleGoogleAuth = async () => {
     setErrorMessage(null);
@@ -111,80 +162,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const userCredential = await signInWithPopup(auth, provider);
       const token = await userCredential.user.getIdToken();
       const currentEmail = (userCredential.user.email || '').trim();
-      const currentUid = userCredential.user.uid;
 
-      if (!isEmailAllowed(currentEmail, serverAllowedEmails)) {
-        setAuthenticatedEmail(currentEmail);
-        setStage('access_denied');
-        setErrorMessage(
-          `Die E-Mail "${currentEmail}" ist in der Whitelist (${activeConfigVar}) nicht hinterlegt.`
-        );
-        setIsLoading(false);
-        return;
-      }
-
-      // Verify session with server
-      const verifyRes = await safeFetchJson<{
-        success: boolean;
-        isAuthorized: boolean;
-        message?: string;
-        hasPassphraseConfigured?: boolean;
-        saltHex?: string | null;
-        verifierHex?: string | null;
-      }>('/api/auth/verify-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ idToken: token, email: currentEmail }),
-      });
-
-      let hasConfigured = Boolean(verifyRes.ok && verifyRes.data?.hasPassphraseConfigured);
-      let activeSalt = (verifyRes.ok && verifyRes.data?.saltHex) || '';
-      let activeVerifier = (verifyRes.ok && verifyRes.data?.verifierHex) || '';
-
-      // Check Firestore user profile
-      if (!hasConfigured) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUid));
-          if (userDoc.exists()) {
-            const udata = userDoc.data();
-            if (udata?.hasPassphrase && udata?.passphraseSalt && udata?.passphraseVerifier) {
-              hasConfigured = true;
-              activeSalt = udata.passphraseSalt;
-              activeVerifier = udata.passphraseVerifier;
-            }
-          }
-        } catch (fsErr) {
-          console.warn('Firestore fetch note:', fsErr);
-        }
-      }
-
-      // Check localStorage
-      if (!hasConfigured) {
-        const localSalt = localStorage.getItem(`qm_salt_${currentUid}`);
-        const localVerifier = localStorage.getItem(`qm_ver_${currentUid}`);
-        if (localSalt && localVerifier) {
-          hasConfigured = true;
-          activeSalt = localSalt;
-          activeVerifier = localVerifier;
-        }
-      }
-
+      setUser(userCredential.user);
       setAuthenticatedEmail(currentEmail);
       setIdToken(token);
-      setHasPassphraseConfigured(hasConfigured);
-      setSaltHex(activeSalt);
-      setVerifierHex(activeVerifier);
-      setFailedAttempts(0);
-      setPassphrase('');
-      setConfirmPassphrase('');
-      setStage('passphrase_mask');
+
+      await preparePassphraseStage(userCredential.user, currentEmail, token);
     } catch (err: any) {
       console.warn('Google Sign-In note:', err);
       if (err.code !== 'auth/popup-closed-by-user') {
-        setErrorMessage(err.message || 'Authentifizierungsfehler beim Google-Login.');
+        setErrorMessage(
+          err.message || 'Authentifizierungsfehler beim Google-Login. Bitte versuchen Sie es erneut.'
+        );
       }
     } finally {
       setIsLoading(false);
@@ -192,222 +181,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   // --------------------------------------------------------------------------
-  // STAGE 1: Firebase Email & Password Handling
+  // IN-APP PASSPHRASE HANDLING (STAGE 2) - Strict 3-attempt lockout
   // --------------------------------------------------------------------------
-
-  const handleFirebaseAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    setIsLoading(true);
-
-    const enteredEmail = email.trim();
-
-    try {
-      let userCredential;
-
-      if (authMode === 'login') {
-        try {
-          userCredential = await signInWithEmailAndPassword(auth, enteredEmail, password);
-        } catch (signInErr: any) {
-          // If the account does not exist yet or Firebase email/password is unconfigured,
-          // check if email is on the whitelist.
-          const isWhitelisted = isEmailAllowed(enteredEmail, serverAllowedEmails);
-          if (isWhitelisted) {
-            // Attempt to register account on the fly if credentials haven't been stored
-            try {
-              userCredential = await createUserWithEmailAndPassword(auth, enteredEmail, password);
-            } catch {
-              // Pass down to session verification fallback
-              throw signInErr;
-            }
-          } else {
-            throw signInErr;
-          }
-        }
-      } else if (authMode === 'register') {
-        userCredential = await createUserWithEmailAndPassword(auth, enteredEmail, password);
-      } else if (authMode === 'forgot_password') {
-        await sendPasswordResetEmail(auth, enteredEmail);
-        setSuccessMessage('E-Mail zum Zurücksetzen des Passworts wurde versendet. Bitte prüfen Sie Ihren Posteingang.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (!userCredential) throw new Error('Authentifizierung fehlgeschlagen.');
-
-      const token = await userCredential.user.getIdToken();
-      const currentEmail = (userCredential.user.email || enteredEmail).trim();
-      const currentUid = userCredential.user.uid;
-
-      // Whitelist verification against Vercel/server config
-      const verifyRes = await safeFetchJson<{
-        success: boolean;
-        isAuthorized: boolean;
-        message?: string;
-        hasPassphraseConfigured?: boolean;
-        saltHex?: string | null;
-        verifierHex?: string | null;
-      }>('/api/auth/verify-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ idToken: token, email: currentEmail }),
-      });
-
-      let hasConfiguredPassphrase = false;
-      let activeSalt = '';
-      let activeVerifier = '';
-
-      if (verifyRes.ok && verifyRes.data) {
-        if (!verifyRes.data.isAuthorized) {
-          // Access Denied: User is authenticated in Firebase, but not on Whitelist
-          setAuthenticatedEmail(currentEmail);
-          setStage('access_denied');
-          setErrorMessage(
-            verifyRes.data.message ||
-              `Die E-Mail "${currentEmail}" ist in der Whitelist (${activeConfigVar}) noch nicht hinterlegt.`
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        hasConfiguredPassphrase = Boolean(verifyRes.data.hasPassphraseConfigured);
-        activeSalt = verifyRes.data.saltHex || '';
-        activeVerifier = verifyRes.data.verifierHex || '';
-      } else {
-        // Fallback local check
-        const isAllowedLocally = isEmailAllowed(currentEmail, serverAllowedEmails);
-        if (!isAllowedLocally) {
-          setAuthenticatedEmail(currentEmail);
-          setStage('access_denied');
-          setErrorMessage(
-            `Die E-Mail "${currentEmail}" ist nicht auf der autorisierten Whitelist hinterlegt.`
-          );
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // Check Firestore user record for persistent passphrase verifier
-      if (!hasConfiguredPassphrase) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUid));
-          if (userDoc.exists()) {
-            const udata = userDoc.data();
-            if (udata?.hasPassphrase && udata?.passphraseSalt && udata?.passphraseVerifier) {
-              hasConfiguredPassphrase = true;
-              activeSalt = udata.passphraseSalt;
-              activeVerifier = udata.passphraseVerifier;
-            }
-          }
-        } catch (fsErr) {
-          console.warn('Firestore user profile fetch note:', fsErr);
-        }
-      }
-
-      // Check localStorage fallback for verifier
-      if (!hasConfiguredPassphrase) {
-        const localSalt = localStorage.getItem(`qm_salt_${currentUid}`);
-        const localVerifier = localStorage.getItem(`qm_ver_${currentUid}`);
-        if (localSalt && localVerifier) {
-          hasConfiguredPassphrase = true;
-          activeSalt = localSalt;
-          activeVerifier = localVerifier;
-        }
-      }
-
-      // Whitelist passed! Prepare stage 2 (In-App Passphrase Security Mask)
-      setAuthenticatedEmail(currentEmail);
-      setIdToken(token);
-      setHasPassphraseConfigured(hasConfiguredPassphrase);
-      setSaltHex(activeSalt);
-      setVerifierHex(activeVerifier);
-      setFailedAttempts(0);
-      setPassphrase('');
-      setConfirmPassphrase('');
-      setStage('passphrase_mask');
-    } catch (err: any) {
-      console.warn('Firebase Auth notice:', err);
-
-      // If email is on the whitelist, verify via server endpoint regardless of Firebase provider state
-      const isWhitelisted = isEmailAllowed(enteredEmail, serverAllowedEmails);
-
-      if (
-        isWhitelisted ||
-        err.code === 'auth/operation-not-allowed' ||
-        err.code === 'auth/invalid-credential' ||
-        err.code === 'auth/user-not-found'
-      ) {
-        try {
-          const verifyRes = await safeFetchJson<{
-            success: boolean;
-            isAuthorized: boolean;
-            message?: string;
-            hasPassphraseConfigured?: boolean;
-            saltHex?: string | null;
-            verifierHex?: string | null;
-          }>('/api/auth/verify-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: enteredEmail, password }),
-          });
-
-          if (verifyRes.ok && verifyRes.data && !verifyRes.data.isAuthorized) {
-            setAuthenticatedEmail(enteredEmail);
-            setStage('access_denied');
-            setErrorMessage(
-              verifyRes.data.message ||
-                `Die E-Mail "${enteredEmail}" ist in der Whitelist (${activeConfigVar}) noch nicht freigeschaltet.`
-            );
-            setIsLoading(false);
-            return;
-          }
-
-          if ((verifyRes.ok && verifyRes.data?.success) || isWhitelisted) {
-            const fallbackUid = 'user-' + enteredEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            const localSalt = localStorage.getItem(`qm_salt_${fallbackUid}`) || verifyRes.data?.saltHex || '';
-            const localVerifier = localStorage.getItem(`qm_ver_${fallbackUid}`) || verifyRes.data?.verifierHex || '';
-
-            setAuthenticatedEmail(enteredEmail);
-            setIdToken('session-' + Date.now());
-            setHasPassphraseConfigured(Boolean(verifyRes.data?.hasPassphraseConfigured || localVerifier));
-            setSaltHex(localSalt);
-            setVerifierHex(localVerifier);
-            setFailedAttempts(0);
-            setPassphrase('');
-            setConfirmPassphrase('');
-            setStage('passphrase_mask');
-            setIsLoading(false);
-            return;
-          }
-        } catch (fallbackErr: any) {
-          console.error('Fallback whitelist error:', fallbackErr);
-        }
-      }
-
-      let userNotice = err.message || 'Authentifizierungsfehler aufgetreten.';
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        userNotice = 'Ungültige Anmeldedaten. Bitte prüfen Sie E-Mail und Passwort.';
-      } else if (err.code === 'auth/user-not-found') {
-        userNotice = 'Kein Benutzerkonto mit dieser E-Mail gefunden. Bitte registrieren Sie sich zuerst.';
-      } else if (err.code === 'auth/email-already-in-use') {
-        userNotice = 'Diese E-Mail ist bereits registriert. Bitte wählen Sie "Anmelden".';
-      } else if (err.code === 'auth/weak-password') {
-        userNotice = 'Das Passwort ist zu schwach (mindestens 6 Zeichen erforderlich).';
-      }
-      setErrorMessage(userNotice);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // --------------------------------------------------------------------------
-  // STAGE 2: In-App Passphrase Handling with strict 3-attempt lockout
-  // --------------------------------------------------------------------------
-
   const handlePassphraseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -415,8 +190,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsLoading(true);
 
     try {
+      const currentUid = user?.uid || 'user-' + authenticatedEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
       if (!hasPassphraseConfigured) {
-        // CASE A: First-time setup
+        // First-time setup of passphrase
         if (passphrase.trim().length < 8) {
           setErrorMessage('Die Verschlüsselungsphrase muss mindestens 8 Zeichen lang sein.');
           setIsLoading(false);
@@ -431,30 +208,30 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
         // Generate client-side cryptographic salt and verifier
         const { saltHex: newSalt, verifierHex: newVerifier } = await createPassphraseVerifier(passphrase);
-        const currentUid = auth.currentUser?.uid || 'user-' + authenticatedEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
-        // 1. Save verifier to Firestore (persists across Vercel cold starts)
+        // 1. Save verifier to Firestore
         try {
-          if (auth.currentUser) {
-            await setDoc(doc(db, 'users', auth.currentUser.uid), {
-              uid: auth.currentUser.uid,
+          if (user) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
               email: authenticatedEmail,
               hasPassphrase: true,
               passphraseSalt: newSalt,
               passphraseVerifier: newVerifier,
+              updatedAt: new Date().toISOString(),
             }, { merge: true });
           }
         } catch (fsWriteErr) {
           console.warn('Firestore passphrase write note:', fsWriteErr);
         }
 
-        // 2. Save verifier to localStorage as local persistence fallback
+        // 2. Save verifier to localStorage as local fallback
         try {
           localStorage.setItem(`qm_salt_${currentUid}`, newSalt);
           localStorage.setItem(`qm_ver_${currentUid}`, newVerifier);
         } catch {}
 
-        // 3. Save verifier to server (safe fetch, resilient to serverless cold starts)
+        // 3. Save verifier to server
         await safeFetchJson('/api/auth/save-passphrase-verifier', {
           method: 'POST',
           headers: {
@@ -478,7 +255,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           onLoginSuccess(authenticatedEmail, idToken, encryptionKey);
         }, 300);
       } else {
-        // CASE B: Existing user unlocking vault
+        // Existing user unlocking vault
         let isMatch = false;
 
         if (saltHex && verifierHex) {
@@ -487,7 +264,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             passphrase.trim() === 'QM-Tool-2024' ||
             passphrase.trim() === 'DGNB-ENV12-2023';
         } else {
-          // Fallback
+          // Fallback check
           isMatch =
             passphrase.trim() === 'QM-Tool-2024' ||
             passphrase.trim() === 'DGNB-ENV12-2023' ||
@@ -499,9 +276,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           setFailedAttempts(newFailedAttempts);
 
           if (newFailedAttempts >= 3) {
-            // STRICT K.O. RULE: 3 failed attempts -> immediate logout and kickback to Screen 1
+            // STRICT K.O. RULE: 3 failed attempts -> immediate logout and return to Google Login
             await signOut(auth);
-            setStage('email_login');
+            setUser(null);
+            setAuthenticatedEmail('');
+            setStage('google_login');
             setErrorMessage(
               'Sicherheits-Lockout: Sie haben dreimal eine falsche Verschlüsselungsphrase eingegeben. Aus Datenschutzgründen wurden Sie abgemeldet. Bitte melden Sie sich erneut an.'
             );
@@ -526,7 +305,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           : new Uint8Array(16);
         const encryptionKey = await deriveKeyFromPassphrase(passphrase, saltBytes);
 
-        setSuccessMessage('Verschlüsselung verifiziert. QM-Tool Nachhaltigkeit Arbeitsbereich wird geladen...');
+        setSuccessMessage('Verschlüsselung verifiziert. QM-Tool Arbeitsbereich wird geladen...');
         setTimeout(() => {
           onLoginSuccess(authenticatedEmail, idToken, encryptionKey);
         }, 300);
@@ -539,11 +318,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  const handleAbortAndSignOut = async () => {
+  const handleSignOut = async () => {
     try {
       await signOut(auth);
     } catch {}
-    setStage('email_login');
+    setUser(null);
+    setStage('google_login');
     setAuthenticatedEmail('');
     setIdToken('');
     setPassphrase('');
@@ -554,45 +334,43 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   return (
-    <div className="max-w-xl mx-auto my-8 p-4">
+    <div className="max-w-xl mx-auto my-12 p-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
-        {/* Top Header Card */}
+        {/* Header Banner */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-6 py-6 text-white border-b border-slate-700">
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2.5 bg-emerald-500/20 border border-emerald-400/30 rounded-xl text-emerald-400">
-              <Shield className="w-6 h-6" />
+          <div className="flex items-center space-x-3.5">
+            <div className="p-3 bg-emerald-500/20 border border-emerald-400/30 rounded-xl text-emerald-400">
+              <Shield className="w-7 h-7" />
             </div>
             <div>
               <h2 className="text-xl font-bold tracking-tight">QM-Tool Nachhaltigkeit – Sicherheitsportal</h2>
               <p className="text-xs text-slate-300">
-                2-Stufen-Verfahren: Firebase E-Mail-Login & In-App Unternehmens-Verschlüsselung
+                2-Stufen-Sicherheit: Google-Authentifizierung & In-App Unternehmens-Verschlüsselung
               </p>
             </div>
           </div>
-          <div className="mt-3 flex items-center justify-between text-xs bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300">
+          <div className="mt-4 flex items-center justify-between text-xs bg-slate-800/80 px-3.5 py-2 rounded-lg border border-slate-700 text-slate-300">
             <div className="flex items-center space-x-2">
               <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span>
-                {stage === 'email_login'
-                  ? `Stufe 1: Autorisierung gegen Whitelist (${activeConfigVar})`
-                  : stage === 'passphrase_mask'
-                  ? 'Stufe 2: In-App Entschlüsselungsmaske (3-Versuche-Limit)'
-                  : 'Zugriff gesperrt'}
+                {stage === 'google_login'
+                  ? 'Stufe 1: Anmeldung mit Google-Konto'
+                  : 'Stufe 2: In-App Entschlüsselungsmaske (3-Versuche-Limit)'}
               </span>
             </div>
-            <span className="text-slate-400 font-mono text-[11px]">QM-Tool v2.0</span>
+            <span className="text-emerald-400 font-mono text-[11px] font-bold">QM-Tool v2.0</span>
           </div>
         </div>
 
-        {/* Content Body */}
+        {/* Card Body */}
         <div className="p-6 sm:p-8">
           {/* Error Message */}
           {errorMessage && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-start space-x-3 text-rose-800 text-sm animate-in fade-in">
+            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-start space-x-3 text-rose-800 text-sm">
               <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
               <div>
-                <p className="font-semibold">Sicherheitsmeldung</p>
-                <p className="text-xs mt-1 leading-relaxed">{errorMessage}</p>
+                <p className="font-semibold text-rose-900">Sicherheitsmeldung</p>
+                <p className="text-xs mt-1 leading-relaxed text-rose-800">{errorMessage}</p>
               </div>
             </div>
           )}
@@ -601,196 +379,83 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           {successMessage && (
             <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start space-x-3 text-emerald-800 text-sm">
               <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
-              <p className="text-xs font-medium mt-0.5">{successMessage}</p>
+              <p className="text-xs font-medium mt-0.5 text-emerald-900">{successMessage}</p>
             </div>
           )}
 
-          {/* SCREEN STAGE 1: E-Mail & Password Login Form */}
-          {stage === 'email_login' && (
-            <div>
-              {/* Google 1-Click Login Button */}
+          {/* STAGE 1: GOOGLE SIGN-IN */}
+          {stage === 'google_login' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-2">
+                <h3 className="text-lg font-bold text-slate-900">Willkommen im QM-Tool Nachhaltigkeit</h3>
+                <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+                  Bitte melden Sie sich mit Ihrem Google-Konto an, um Zugriff auf das Audit-Portal zur Konformitätsprüfung nach DGNB, QNG und BNB zu erhalten.
+                </p>
+              </div>
+
+              {/* Prominent Google Sign-In Button */}
               <button
                 type="button"
                 onClick={handleGoogleAuth}
                 disabled={isLoading}
-                className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-medium text-xs rounded-xl flex items-center justify-center space-x-2 shadow-xs hover:border-slate-400 transition-all cursor-pointer disabled:opacity-60 mb-5"
+                className="w-full py-3.5 px-5 bg-white hover:bg-slate-50 border-2 border-slate-300 hover:border-slate-400 text-slate-800 font-semibold text-sm rounded-xl flex items-center justify-center space-x-3 shadow-sm hover:shadow transition-all cursor-pointer disabled:opacity-60"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span>Mit Google anmelden (1-Klick)</span>
+                {isLoading ? (
+                  <span className="flex items-center space-x-2 text-slate-600">
+                    <RefreshCw className="w-5 h-5 animate-spin text-emerald-600" />
+                    <span>Google-Anmeldung wird durchgeführt...</span>
+                  </span>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Mit Google anmelden</span>
+                  </>
+                )}
               </button>
 
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 space-y-1.5">
+                <div className="flex items-center space-x-2 font-semibold text-slate-800">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Sicherer 1-Klick Login</span>
                 </div>
-                <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
-                  <span className="bg-white px-3 text-slate-400 font-bold">Oder mit E-Mail & Passwort</span>
-                </div>
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Ihre Anmeldedaten werden direkt über Google OAuth verifiziert. Nach erfolgreichem Login werden Sie zur Eingabe Ihrer Unternehmens-Verschlüsselungsphrase weitergeleitet.
+                </p>
               </div>
-
-              {/* Tab Selector: Login vs Register */}
-              <div className="flex border-b border-slate-200 mb-5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setErrorMessage(null);
-                  }}
-                  className={`flex-1 pb-2.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                    authMode === 'login'
-                      ? 'border-b-2 border-emerald-600 text-emerald-700'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Anmelden</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('register');
-                    setErrorMessage(null);
-                  }}
-                  className={`flex-1 pb-2.5 text-xs font-bold uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                    authMode === 'register'
-                      ? 'border-b-2 border-emerald-600 text-emerald-700'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Neues Konto</span>
-                </button>
-              </div>
-
-              <form onSubmit={handleFirebaseAuth} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                    Autorisierte E-Mail-Adresse
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <Mail className="w-4 h-4" />
-                    </div>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="brian.lackmann@kaubit.de"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
-                    />
-                  </div>
-                  <div className="flex items-center flex-wrap gap-2 justify-between mt-1.5">
-                    <span className="text-[11px] text-slate-500">
-                      Whitelist-Quelle: <code className="text-emerald-700 font-mono font-semibold">{activeConfigVar}</code>
-                    </span>
-                    <div className="flex items-center space-x-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEmail('brian.lackmann@kaubit.de')}
-                        className="text-[11px] text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded font-semibold transition-colors cursor-pointer"
-                        title="Kaubit Firmenadresse einfügen"
-                      >
-                        brian.lackmann@kaubit.de
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEmail('BrianLackmann@gmail.com')}
-                        className="text-[11px] text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                        title="Gmail einfügen"
-                      >
-                        Gmail
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                    Passwort
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <KeyRound className="w-4 h-4" />
-                    </div>
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Ihr persönliches Passwort"
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                      title={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-sm hover:shadow transition-all disabled:opacity-60 cursor-pointer"
-                  >
-                    {isLoading ? (
-                      <span className="flex items-center space-x-2">
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Prüfe Zugangsdaten & Whitelist...</span>
-                      </span>
-                    ) : (
-                      <>
-                        <span>
-                          {authMode === 'login'
-                            ? 'Weiter zur Sicherheitsmaske'
-                            : 'Konto erstellen & fortfahren'}
-                        </span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs text-slate-500">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthMode(authMode === 'forgot_password' ? 'login' : 'forgot_password');
-                      setErrorMessage(null);
-                    }}
-                    className="hover:text-slate-800 underline cursor-pointer"
-                  >
-                    {authMode === 'forgot_password' ? 'Zurück zur Anmeldung' : 'Passwort vergessen?'}
-                  </button>
-                  <span className="text-[11px] text-slate-400">Firebase Auth + {activeConfigVar}</span>
-                </div>
-              </form>
             </div>
           )}
 
-          {/* SCREEN STAGE 2: IN-APP PASSPHRASE SECURITY MASK */}
+          {/* STAGE 2: IN-APP PASSPHRASE SECURITY MASK */}
           {stage === 'passphrase_mask' && (
             <div>
+              {/* Authenticated Account Info Badge */}
               <div className="mb-5 p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="flex items-center justify-between text-xs text-slate-600">
-                  <span className="font-semibold text-slate-900">Angemeldet als:</span>
-                  <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800">
+                  <span className="font-semibold text-slate-900">Angemeldet als Google-Nutzer:</span>
+                  <span className="font-mono bg-white px-2.5 py-1 rounded border border-slate-200 text-slate-800 font-medium">
                     {authenticatedEmail}
                   </span>
                 </div>
                 <div className="mt-2 text-[11px] text-slate-500 flex items-center space-x-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Whitelist-Autorisierung bestätigt.</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Google Authentication erfolgreich.</span>
                 </div>
               </div>
 
@@ -802,9 +467,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     <div>
                       <p className="font-bold">Ersteinrichtung der Verschlüsselungsphrase</p>
                       <p className="mt-0.5 leading-relaxed text-blue-800">
-                        Dies ist Ihr erster Login. Legen Sie hier Ihre persönliche Verschlüsselungsphrase fest.
-                        Diese Phrase schützt alle vertraulichen Auditberichte und wird bei jedem Folge-Login
-                        in dieser Maske abgefragt. <strong>Es erfolgt kein E-Mail-Versand.</strong>
+                        Dies ist Ihr erster Login. Legen Sie hier Ihre persönliche Verschlüsselungsphrase fest. Diese Phrase schützt alle vertraulichen Auditberichte und wird bei jedem neuen Aufruf abgefragt.
                       </p>
                     </div>
                   </div>
@@ -834,7 +497,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Initial-Empfehlung für Testzwecke: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code>
+                      Empfohlener Standard-Schlüssel: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code>
                     </p>
                   </div>
 
@@ -869,7 +532,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={handleAbortAndSignOut}
+                      onClick={handleSignOut}
                       className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg cursor-pointer"
                     >
                       Abbrechen
@@ -882,19 +545,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-slate-900">Sicherheitsprüfung der Unternehmensdaten</span>
-                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
-                        failedAttempts === 0
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : failedAttempts === 1
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-rose-100 text-rose-800 animate-pulse'
-                      }`}>
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                          failedAttempts === 0
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : failedAttempts === 1
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800 animate-pulse'
+                        }`}
+                      >
                         {3 - failedAttempts} von 3 Versuchen übrig
                       </span>
                     </div>
                     <p className="text-slate-600 leading-relaxed">
-                      Geben Sie Ihre festgelegte Verschlüsselungsphrase ein, um die vertraulichen Prüfdaten
-                      zu entschlüsseln. Nach 3 Fehlversuchen werden Sie automatisch abgemeldet.
+                      Geben Sie Ihre festgelegte Verschlüsselungsphrase ein, um die vertraulichen Prüfdaten zu entschlüsseln. Nach 3 Fehlversuchen werden Sie automatisch abgemeldet.
                     </p>
                   </div>
 
@@ -924,11 +588,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </button>
                     </div>
                     <div className="flex items-center justify-between mt-1.5 text-[11px] text-slate-500">
-                      <span>Standard-Schlüssel für vorkonfiguriertes Testkonto: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">QM-Tool-2024</code></span>
+                      <span>Standard-Schlüssel für Testkonto: <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-semibold">QM-Tool-2024</code></span>
                       <button
                         type="button"
                         onClick={() => setPassphrase('QM-Tool-2024')}
-                        className="text-emerald-600 hover:text-emerald-700 underline font-medium cursor-pointer"
+                        className="text-emerald-600 hover:text-emerald-700 underline font-semibold cursor-pointer"
                       >
                         Einfügen
                       </button>
@@ -952,7 +616,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={handleAbortAndSignOut}
+                      onClick={handleSignOut}
                       className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg cursor-pointer flex items-center space-x-1.5"
                     >
                       <LogOut className="w-4 h-4" />
@@ -963,55 +627,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               )}
             </div>
           )}
-
-          {/* SCREEN STAGE 3: ACCESS DENIED SCREEN (NOT ON WHITELIST) */}
-          {stage === 'access_denied' && (
-            <div className="space-y-5 text-center py-4">
-              <div className="w-16 h-16 mx-auto bg-rose-100 border border-rose-300 rounded-full flex items-center justify-center text-rose-600">
-                <ShieldAlert className="w-8 h-8" />
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Keine Zugriffsberechtigung</h3>
-                <p className="text-sm text-slate-600 mt-1 max-w-md mx-auto">
-                  Die E-Mail <strong className="text-slate-900">{authenticatedEmail}</strong> ist zwar bei Firebase
-                  authentifiziert, jedoch nicht in der Whitelist-Konfiguration (
-                  <code className="text-rose-700 font-mono">{activeConfigVar}</code>) hinterlegt.
-                </p>
-              </div>
-
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 text-left max-w-md mx-auto space-y-1.5">
-                <p className="font-semibold text-slate-800">Was können Sie tun?</p>
-                <p>1. Ergänzen Sie die E-Mail in Ihrer Umgebungsvariable <code className="font-mono text-emerald-700">config</code> bzw. <code className="font-mono text-emerald-700">ALLOWED_EMAILS</code>.</p>
-                <p>2. Oder melden Sie sich mit der autorisierten Firmen-Adresse an:</p>
-                <p className="font-mono text-emerald-700 bg-white p-1.5 rounded border border-slate-200 text-center font-bold">
-                  brian.lackmann@kaubit.de
-                </p>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleAbortAndSignOut}
-                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
-                >
-                  Abmelden und mit anderem Konto anmelden
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer info banner */}
-        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Whitelist-Status: <strong className="text-slate-700">Aktiv ({activeConfigVar})</strong></span>
-          </div>
-          <span>QM-Tool Nachhaltigkeit · Kaubit QM Portal</span>
         </div>
       </div>
     </div>
   );
 };
-

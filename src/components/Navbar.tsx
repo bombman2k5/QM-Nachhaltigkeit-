@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Building2, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Building2, ArrowRight, LogOut, User as UserIcon } from 'lucide-react';
 
 interface NavbarProps {
   activeStep: number;
@@ -7,6 +7,8 @@ interface NavbarProps {
   projectName: string;
   setProjectName: (name: string) => void;
   hasEvaluationResult: boolean;
+  userEmail?: string;
+  onSignOut?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -15,6 +17,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   projectName,
   setProjectName,
   hasEvaluationResult,
+  userEmail,
+  onSignOut,
 }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
@@ -94,14 +98,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Project & Quick Action Zone */}
           <div className="flex items-center space-x-3 shrink-0">
             {/* Project Name editable */}
-            <div className="flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+            <div className="hidden sm:flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
               <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
                 type="text"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder="Projektname eingeben..."
-                className="bg-transparent border-none text-slate-900 font-medium focus:outline-none w-36 sm:w-52 truncate text-xs"
+                className="bg-transparent border-none text-slate-900 font-medium focus:outline-none w-32 md:w-44 truncate text-xs"
                 title="Klicken zum Bearbeiten der Projektbezeichnung"
               />
             </div>
@@ -110,11 +114,31 @@ export const Navbar: React.FC<NavbarProps> = ({
             {activeStep === 1 && (
               <button
                 onClick={() => onStepChange(2)}
-                className="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                className="hidden lg:flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
               >
                 <span>Zur Produktprüfung</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
+            )}
+
+            {/* User Profile Badge & Sign-Out Button */}
+            {userEmail && (
+              <div className="flex items-center space-x-2 border-l border-slate-200 pl-3">
+                <div className="hidden xl:flex items-center space-x-1.5 text-[11px] font-medium text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                  <UserIcon className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span className="truncate max-w-[140px] font-mono">{userEmail}</span>
+                </div>
+                {onSignOut && (
+                  <button
+                    onClick={onSignOut}
+                    className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs"
+                    title="Abmelden & Tresor sperren"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="hidden sm:inline text-[11px] font-medium">Abmelden</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

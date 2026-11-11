@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { auth } from './firebase/config';
+import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { Stepper } from './components/Stepper';
 import { Step1Matrix } from './components/Step1Matrix';
@@ -14,6 +17,9 @@ import { INITIAL_SUSTAINABILITY_STANDARDS } from './data/standardsCatalogs';
 import { ProductEvaluationResult, SustainabilityStandard } from './types/dgnb';
 
 export default function App() {
+  const [authUser, setAuthUser] = useState<User | null>(auth.currentUser);
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
+  const [authenticatedEmail, setAuthenticatedEmail] = useState<string>('');
   const [currentStep, setCurrentStep] = useState<number>(1);
 
   // Multiple sustainability standards list (DGNB, QNG, BNB, plus custom uploads)
@@ -26,6 +32,34 @@ export default function App() {
 
   const [projectName, setProjectName] = useState<string>('Neubau Büro- & Geschäftshaus Campus Nord');
   const [evaluationResult, setEvaluationResult] = useState<ProductEvaluationResult | null>(null);
+
+  // Track Firebase Google auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      if (user && user.email) {
+        setAuthenticatedEmail(user.email);
+      } else {
+        setAuthenticatedEmail('');
+        setIsUnlocked(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLoginSuccess = (email: string) => {
+    setAuthenticatedEmail(email);
+    setIsUnlocked(true);
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch {}
+    setAuthUser(null);
+    setAuthenticatedEmail('');
+    setIsUnlocked(false);
+  };
 
   const handleConfirmMatrix = () => {
     setIsMatrixConfirmed(true);
@@ -47,15 +81,26 @@ export default function App() {
     setCurrentStep(2);
   };
 
+  // Guard entire application behind Google Auth + Passphrase Security Mask
+  if (!authUser || !isUnlocked) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col justify-center font-sans antialiased text-slate-900 py-8">
+        <AuthScreen onLoginSuccess={handleLoginSuccess} currentUser={authUser} />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans antialiased text-slate-900">
-      {/* Top Navigation - Clean & accessible without login barrier */}
+      {/* Top Navigation Bar with User Profile & Sign Out */}
       <Navbar
         activeStep={currentStep}
         onStepChange={setCurrentStep}
         projectName={projectName}
         setProjectName={setProjectName}
         hasEvaluationResult={Boolean(evaluationResult)}
+        userEmail={authenticatedEmail}
+        onSignOut={handleSignOut}
       />
 
       {/* Workflow Stepper */}
@@ -78,14 +123,14 @@ export default function App() {
             onConfirmMatrix={handleConfirmMatrix}
             onUnlockMatrix={handleUnlockMatrix}
             onProceedToStep2={() => setCurrentStep(2)}
-            userEmail="auditor@bau-qm.org"
+            userEmail={authenticatedEmail || 'auditor@bau-qm.org'}
           />
         ) : currentStep === 2 ? (
           <Step2ProductUpload
             standards={standards}
             onAnalysisComplete={handleAnalysisComplete}
             projectName={projectName}
-            userEmail="auditor@bau-qm.org"
+            userEmail={authenticatedEmail || 'auditor@bau-qm.org'}
           />
         ) : currentStep === 3 && evaluationResult ? (
           <Step3Evaluation

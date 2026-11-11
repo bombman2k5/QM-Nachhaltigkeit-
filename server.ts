@@ -274,17 +274,6 @@ app.post('/api/auth/verify-session', async (req: Request, res: Response) => {
       });
     }
 
-    const allowed = getAllowedEmails();
-
-    if (!isEmailAllowed(userEmail, allowed)) {
-      return res.status(403).json({
-        success: false,
-        isAuthorized: false,
-        email: userEmail,
-        message: `Zugriff verweigert: Die E-Mail-Adresse "${userEmail}" ist nicht auf der autorisierten Whitelist (config / ALLOWED_EMAILS) hinterlegt. Bitte kontaktieren Sie Ihren Administrator oder nutzen Sie brian.lackmann@kaubit.de.`,
-      });
-    }
-
     const normalizedKey = userEmail.toLowerCase();
     const existingRecord = userPassphraseRecords.get(normalizedKey);
 
@@ -296,7 +285,7 @@ app.post('/api/auth/verify-session', async (req: Request, res: Response) => {
       hasPassphraseConfigured: Boolean(existingRecord),
       saltHex: existingRecord?.saltHex || null,
       verifierHex: existingRecord?.verifierHex || null,
-      message: 'Authentifizierung und Whitelist-Prüfung erfolgreich.',
+      message: 'Authentifizierung erfolgreich.',
     });
   } catch (err: any) {
     console.error('Error verifying session:', err);
@@ -330,8 +319,8 @@ app.post('/api/auth/save-passphrase-verifier', async (req: Request, res: Respons
       uid = 'user-' + Buffer.from(userEmail).toString('hex').slice(0, 16);
     }
 
-    if (!userEmail || !isEmailAllowed(userEmail, getAllowedEmails())) {
-      return res.status(403).json({ success: false, message: 'E-Mail nicht autorisiert.' });
+    if (!userEmail) {
+      return res.status(403).json({ success: false, message: 'Fehlende E-Mail-Adresse.' });
     }
 
     if (!saltHex || !verifierHex) {
