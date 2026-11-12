@@ -36,7 +36,9 @@ import {
   isCorporateEmailAuthorized,
   loadCompanyVault,
   saveCompanyVault,
-  updateAuthorizedEmployeeEmails,
+  saveCompanyVaultWithStatus,
+  subscribeToCompanyVault,
+  verifyVaultPersistenceWithoutLocalCache,
 } from '../utils/companyVaultService';
 
 interface AuthScreenProps {
@@ -62,6 +64,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [saltHex, setSaltHex] = useState<string>('');
   const [verifierHex, setVerifierHex] = useState<string>('');
   const [authorizedEmails, setAuthorizedEmails] = useState<string[]>([...ADMIN_EMAILS]);
+  const [vaultSource, setVaultSource] = useState<'firestore' | 'server' | 'local' | 'default'>('default');
 
   // Passphrase & Corporate Email Mask State
   const [corporateEmailInput, setCorporateEmailInput] = useState<string>('');
@@ -82,10 +85,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const isAdmin = isAdminEmail(authenticatedEmail);
 
   useEffect(() => {
+    let vaultUnsubscribe: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (vaultUnsubscribe) {
+        vaultUnsubscribe();
+        vaultUnsubscribe = null;
+      }
+
       if (currentUser) {
         setUser(currentUser);
-        const currentEmail = (currentUser.email || '').trim();
+        const currentEmail = (
+          currentUser.email ||
+          currentUser.providerData?.find((p) => p?.email)?.email ||
+          ''
+        ).trim();
         setAuthenticatedEmail(currentEmail);
         try {
           const token = await currentUser.getIdToken();
@@ -94,6 +108,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         } catch (err) {
           console.warn('Token fetch note:', err);
         }
+
+        vaultUnsubscribe = subscribeToCompanyVault(currentUser, (liveVault) => {
+          if (liveVault.hasPassphraseConfigured) {
+            setHasPassphraseConfigured(true);
+            setSaltHex(liveVault.saltHex);
+            setVerifierHex(liveVault.verifierHex);
+          }
+          setAuthorizedEmails(liveVault.authorizedEmails);
+          if (liveVault.source) {
+            setVaultSource(liveVault.source);
+          }
+        });
       } else {
         setUser(null);
         setAuthenticatedEmail('');
@@ -101,7 +127,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (vaultUnsubscribe) vaultUnsubscribe();
+    };
   }, []);
 
   const preparePassphraseStage = async (currentUser: User, token: string) => {
@@ -110,6 +139,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setSaltHex(vault.saltHex);
     setVerifierHex(vault.verifierHex);
     setAuthorizedEmails(vault.authorizedEmails);
+    if (vault.source) setVaultSource(vault.source);
     setStage('passphrase_mask');
   };
 
@@ -159,21 +189,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     setIsSavingEmployee(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       const updated = Array.from(new Set([...authorizedEmails, clean]));
-      if (saltHex && verifierHex) {
-        const saved = await updateAuthorizedEmployeeEmails(
-          user,
-          idToken,
-          { saltHex, verifierHex },
-          updated
-        );
-        setAuthorizedEmails(saved);
-      } else {
-        setAuthorizedEmails(updated);
-      }
+      const saveResult = await saveCompanyVaultWithStatus(user, idToken, {
+        saltHex,
+        verifierHex,
+        authorizedEmails: updated,
+      });
+      setAuthorizedEmails(saveResult.authorizedEmails);
+      setVaultSource(saveResult.source);
       setNewEmployeeEmail('');
-      setSuccessMessage(`Mitarbeiter-Konto "${clean}" wurde freigeschaltet.`);
+      setSuccessMessage(
+        saveResult.persistedToFirestore
+          ? `Mitarbeiter-Konto "${clean}" wurde persistent in Firebase Firestore (vault/company & employees) gespeichert.`
+          : `Mitarbeiter-Konto "${clean}" wurde freigeschaltet und auf dem Server gesichert.`
+      );
     } catch (err: any) {
       setErrorMessage('Fehler beim Anlegen des Mitarbeiter-Kontos: ' + (err.message || String(err)));
     } finally {
@@ -190,22 +221,49 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     setIsSavingEmployee(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       const updated = authorizedEmails.filter((e) => e.toLowerCase() !== emailToRemove.toLowerCase());
-      if (saltHex && verifierHex) {
-        const saved = await updateAuthorizedEmployeeEmails(
-          user,
-          idToken,
-          { saltHex, verifierHex },
-          updated
-        );
-        setAuthorizedEmails(saved);
-      } else {
-        setAuthorizedEmails(updated);
-      }
-      setSuccessMessage(`Freigabe für "${emailToRemove}" wurde entfernt.`);
+      const saveResult = await saveCompanyVaultWithStatus(user, idToken, {
+        saltHex,
+        verifierHex,
+        authorizedEmails: updated,
+      });
+      setAuthorizedEmails(saveResult.authorizedEmails);
+      setVaultSource(saveResult.source);
+      setSuccessMessage(
+        saveResult.persistedToFirestore
+          ? `Freigabe für "${emailToRemove}" wurde in Firebase Firestore entfernt.`
+          : `Freigabe für "${emailToRemove}" wurde entfernt.`
+      );
     } catch (err: any) {
       setErrorMessage('Fehler beim Entfernen des Kontos: ' + (err.message || String(err)));
+    } finally {
+      setIsSavingEmployee(false);
+    }
+  };
+
+  const handleVerifyFirebasePersistence = async () => {
+    if (!isAdmin) return;
+    setIsSavingEmployee(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const reloaded = await verifyVaultPersistenceWithoutLocalCache(user, idToken);
+      setAuthorizedEmails(reloaded.authorizedEmails);
+      if (reloaded.hasPassphraseConfigured) {
+        setHasPassphraseConfigured(true);
+        setSaltHex(reloaded.saltHex);
+        setVerifierHex(reloaded.verifierHex);
+      }
+      if (reloaded.source) setVaultSource(reloaded.source);
+      setSuccessMessage(
+        reloaded.source === 'firestore'
+          ? `Firebase-Persistenz verifiziert: Lokaler Browser-Cache (localStorage) wurde gelöscht und ${reloaded.authorizedEmails.length} E-Mail-Konto/Konten wurden direkt vom Google Firebase Firestore Server neu geladen.`
+          : `Persistenz geprüft: Lokaler Browser-Cache wurde gelöscht und ${reloaded.authorizedEmails.length} E-Mail-Konto/Konten wurden vom Server geladen.`
+      );
+    } catch (err: any) {
+      setErrorMessage('Fehler beim Prüfen der Firebase-Persistenz: ' + (err.message || String(err)));
     } finally {
       setIsSavingEmployee(false);
     }
@@ -715,30 +773,58 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {/* ADMIN-ONLY EMPLOYEE ACCOUNT & VAULT MANAGEMENT PANEL */}
               {isAdmin && (
                 <div className="pt-4 border-t border-slate-200 space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center space-x-2">
                       <Users className="w-4 h-4 text-emerald-600" />
                       <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
                         Admin-Verwaltung: Freigeschaltete Mitarbeiter-Konten ({authorizedEmails.length})
                       </h4>
                     </div>
-                    {hasPassphraseConfigured && !isResettingPassphrase && (
+                    <div className="flex items-center space-x-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          setPassphrase('');
-                          setConfirmPassphrase('');
-                          setIsResettingPassphrase(true);
-                        }}
-                        className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                        onClick={handleVerifyFirebasePersistence}
+                        disabled={isSavingEmployee}
+                        className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                        title="Löscht den lokalen Browser-Cache (localStorage) und lädt alle E-Mails frisch aus Firebase Firestore"
                       >
-                        Passphrase ändern
+                        <RefreshCw className={`w-3 h-3 ${isSavingEmployee ? 'animate-spin' : ''}`} />
+                        <span>Firebase-Persistenz prüfen</span>
                       </button>
-                    )}
+                      {hasPassphraseConfigured && !isResettingPassphrase && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPassphrase('');
+                            setConfirmPassphrase('');
+                            setIsResettingPassphrase(true);
+                          }}
+                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                        >
+                          Passphrase ändern
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200/80 text-[11px] text-emerald-900">
+                    <span>
+                      Speicherort:{' '}
+                      <strong>
+                        {vaultSource === 'firestore'
+                          ? 'Google Firebase Firestore (vault/company & employees)'
+                          : vaultSource === 'server'
+                          ? 'Firebase / Backend-Server'
+                          : 'Firebase Cloud-Synchronisation bereit'}
+                      </strong>
+                    </span>
+                    <span className="font-mono text-[10px] text-emerald-700 font-semibold">
+                      Persistent
+                    </span>
                   </div>
 
                   <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Legen Sie hier über die betriebliche E-Mail-Adresse ein Konto für Mitarbeiter an. Nur hier gelistete E-Mail-Adressen können sich zusammen mit der Unternehmens-Passphrase anmelden.
+                    Legen Sie hier über die betriebliche E-Mail-Adresse ein Konto für Mitarbeiter an. Angelegte E-Mail-Adressen werden direkt in Firebase Firestore (Sammlungen <code className="font-mono">vault/company</code> und <code className="font-mono">employees</code>) hinterlegt.
                   </p>
 
                   <form onSubmit={handleAddEmployeeAccount} className="flex space-x-2">

@@ -399,7 +399,14 @@ test('revalidateCachedResult downgrades expired test reports against current yea
 });
 
 test('companyVaultService enforces Admin-only roles and registered employee corporate emails', async () => {
-  const { isAdminEmail, isCorporateEmailAuthorized } = await import('./companyVaultService');
+  const {
+    isAdminEmail,
+    isCorporateEmailAuthorized,
+    emailToEmployeeDocId,
+    normalizeEmailList,
+    verifyVaultPersistenceWithoutLocalCache,
+    LOCAL_VAULT_KEY,
+  } = await import('./companyVaultService');
 
   assert.equal(isAdminEmail('brian.lackmann@kaubit.de'), true);
   assert.equal(isAdminEmail('BrianLackmann@gmail.com'), true);
@@ -409,5 +416,59 @@ test('companyVaultService enforces Admin-only roles and registered employee corp
   assert.equal(isCorporateEmailAuthorized('mitarbeiter1@kaubit.de', allowedList), true);
   assert.equal(isCorporateEmailAuthorized('MITARBEITER1@KAUBIT.DE', allowedList), true);
   assert.equal(isCorporateEmailAuthorized('unbekannt@kaubit.de', allowedList), false);
+
+  // Verify Firestore employee document ID generation matches Firestore rule regex ^[a-zA-Z0-9_\-]+$
+  const docId = emailToEmployeeDocId('Max.Mustermann+Test@Kaubit.de');
+  assert.equal(docId, 'max_mustermann_test_at_kaubit_de');
+  assert.ok(/^[a-zA-Z0-9_-]+$/.test(docId));
+  assert.ok(docId.length <= 128);
+
+  // Verify normalizeEmailList always preserves both admins and deduplicates employee emails
+  const normalized = normalizeEmailList([
+    '  ProjektLeitung@Kaubit.de ',
+    'projektleitung@kaubit.de',
+    'invalid-email',
+  ]);
+  assert.ok(normalized.includes('brian.lackmann@kaubit.de'));
+  assert.ok(normalized.includes('brianlackmann@gmail.com'));
+  assert.ok(normalized.includes('projektleitung@kaubit.de'));
+  assert.equal(normalized.filter((e) => e === 'projektleitung@kaubit.de').length, 1);
+  assert.equal(normalized.includes('invalid-email'), false);
+
+  // Verify verifyVaultPersistenceWithoutLocalCache wipes localStorage and does not read stale localStorage
+  const mockStore: Record<string, string> = {
+    [LOCAL_VAULT_KEY]: JSON.stringify({
+      saltHex: '11223344556677889900aabbccddeeff',
+      verifierHex: '11223344556677889900aabbccddeeff',
+      authorizedEmails: ['brian.lackmann@kaubit.de', 'nur-lokal@kaubit.de'],
+      syncedToFirestore: false,
+    }),
+  };
+  (globalThis as any).localStorage = {
+    getItem: (k: string) => mockStore[k] ?? null,
+    setItem: (k: string, v: string) => {
+      mockStore[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete mockStore[k];
+    },
+  };
+
+  const reloaded = await verifyVaultPersistenceWithoutLocalCache(null, '');
+  assert.equal(mockStore[LOCAL_VAULT_KEY], undefined);
+  assert.equal(reloaded.authorizedEmails.includes('nur-lokal@kaubit.de'), false);
+  delete (globalThis as any).localStorage;
+
+  // Verify normalizeFirestoreDatabaseId fixes missing 'ai-studio-' prefix from env vars
+  const { normalizeFirestoreDatabaseId } = await import('../firebase/config');
+  assert.equal(
+    normalizeFirestoreDatabaseId(
+      'dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4',
+      'ai-studio-dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4'
+    ),
+    'ai-studio-dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4'
+  );
 });
+
+
 
