@@ -470,5 +470,41 @@ test('companyVaultService enforces Admin-only roles and registered employee corp
   );
 });
 
+test('KAUBIT_LETTERHEAD contains complete extracted header and footer from Vorlage_wpz_neu_9a344953.pdf', async () => {
+  const { KAUBIT_LETTERHEAD, DEMO_KAUBIT_EVALUATION_RESULT } = await import(
+    '../data/kaubitLetterhead'
+  );
 
+  // Header verification
+  assert.equal(KAUBIT_LETTERHEAD.header.brandName, 'KAUBIT');
+  assert.equal(KAUBIT_LETTERHEAD.header.tagline, 'Systemabdichtungsbaustoffe');
+  assert.equal(
+    KAUBIT_LETTERHEAD.header.postalHeaderLine,
+    'KAUBIT Aktiengesellschaft · Postfach 11 48 · DE-49407 Dinklage'
+  );
+  assert.ok(
+    fs.existsSync(path.resolve(process.cwd(), 'public/assets/aistudio/kaubit-logo.png')),
+    'Extracted KAUBIT logo PNG must exist in public/assets/aistudio/kaubit-logo.png'
+  );
 
+  // Footer Column 1 & 2 verification
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.companyName, 'Kaubit Aktiengesellschaft');
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.street, 'Industriestraße 1');
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.city, 'DE-49413 Dinklage');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.registerNumber, 'Abt. B Nr. 111274');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.vatId, 'USt-IdNr. DE812447898');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.taxNumber, 'Steuer-Nr. 68/203/71814');
+
+  // Footer Column 3 & 4 (7 bank accounts with BIC & IBAN)
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts.length, 7);
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts[0].bic, 'OLBODEH2XXX');
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts[6].bic, 'NOLADE21BEB');
+
+  // Executive board line
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Sylvia Selting'));
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Rüdiger Selting'));
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Bernhard Taute'));
+
+  // Demo evaluation result for Step 4
+  assert.equal(DEMO_KAUBIT_EVALUATION_RESULT.standardsEvaluations['DGNB'].overallLevelNum, 4);
+});
