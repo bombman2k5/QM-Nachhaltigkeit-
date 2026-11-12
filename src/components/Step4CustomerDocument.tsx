@@ -154,10 +154,10 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
               </div>
               <div>
                 <span className="block text-[10px] uppercase font-bold text-slate-400">
-                  Bauvorhaben / Projekt
+                  Kunde/Produktname
                 </span>
                 <span className="font-medium text-slate-900 truncate block">
-                  {projectName || result.auditMetadata.projectName}
+                  {projectName || result.auditMetadata.projectName || '—'}
                 </span>
               </div>
             </div>

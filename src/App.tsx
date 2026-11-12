@@ -45,7 +45,7 @@ export default function App() {
     return isAutostart || localStorage.getItem('sustainability_matrix_confirmed') === 'true';
   });
 
-  const [projectName, setProjectName] = useState<string>('Neubau Büro- & Geschäftshaus Campus Nord');
+  const [projectName, setProjectName] = useState<string>('');
   const [evaluationResult, setEvaluationResult] = useState<ProductEvaluationResult | null>(
     isAutostart ? DEMO_KAUBIT_EVALUATION_RESULT : null
   );

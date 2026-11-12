@@ -1372,7 +1372,7 @@ app.post('/api/standards/analyze-product', requireAuth, async (req: Request, res
         auditId,
         auditDate,
         auditorEmail: userEmail || 'auditor@bau-qm.org',
-        projectName: projectTitle || 'Neubauvorhaben / Nachhaltigkeitsaudit',
+        projectName: projectTitle ? projectTitle.trim() : '',
         standardsVersionSummary: targetStandards.join(', '),
       },
       standardsEvaluations: evaluations,

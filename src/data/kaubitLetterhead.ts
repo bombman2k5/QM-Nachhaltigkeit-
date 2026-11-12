@@ -264,7 +264,7 @@ export const DEMO_KAUBIT_EVALUATION_RESULT: ProductEvaluationResult = {
     auditId: 'WPZ-KAUBIT-2026-0412',
     auditDate: '12.11.2026',
     auditorEmail: 'brian.lackmann@kaubit.de',
-    projectName: 'Neubau Büro- & Geschäftshaus Campus Nord',
+    projectName: '',
     standardsVersionSummary: 'DGNB 2023 · QNG 1.3 · BNB 2015',
   },
 };

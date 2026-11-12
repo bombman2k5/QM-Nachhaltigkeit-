@@ -505,6 +505,7 @@ test('KAUBIT_LETTERHEAD contains complete extracted header and footer from Vorla
   assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Rüdiger Selting'));
   assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Bernhard Taute'));
 
-  // Demo evaluation result for Step 4
+  // Demo evaluation result for Step 4 has no pre-filled demo projectName
   assert.equal(DEMO_KAUBIT_EVALUATION_RESULT.standardsEvaluations['DGNB'].overallLevelNum, 4);
+  assert.equal(DEMO_KAUBIT_EVALUATION_RESULT.auditMetadata.projectName, '');
 });

@@ -222,16 +222,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Project & Quick Action Zone */}
             <div className="flex items-center space-x-3 shrink-0">
-              {/* Project Name editable */}
+              {/* Kunde/Produktname editable */}
               <div className="hidden sm:flex items-center space-x-1.5 text-xs text-slate-700 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                 <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="text-[11px] font-semibold text-slate-500 whitespace-nowrap">
+                  Kunde/Produktname:
+                </span>
                 <input
                   type="text"
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="Projektname eingeben..."
-                  className="bg-transparent border-none text-slate-900 font-medium focus:outline-none w-32 md:w-44 truncate text-xs"
-                  title="Klicken zum Bearbeiten der Projektbezeichnung"
+                  placeholder="Kunde/Produktname eingeben..."
+                  aria-label="Kunde/Produktname"
+                  className="bg-transparent border-none text-slate-900 font-medium focus:outline-none w-36 md:w-48 truncate text-xs"
+                  title="Klicken zum Bearbeiten von Kunde/Produktname"
                 />
               </div>
 
