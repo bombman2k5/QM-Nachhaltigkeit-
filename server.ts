@@ -58,7 +58,7 @@ const FIRESTORE_DATABASE_ID = !rawEnvDbId
   : rawEnvDbId.startsWith('dgnbenv12qmprfto-')
   ? `ai-studio-${rawEnvDbId}`
   : rawEnvDbId;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.8-flash';
 
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
@@ -273,7 +273,7 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 /**
- * Calls Gemini with temperature: 0 and automatic model fallback if a custom model ID is unavailable.
+ * Calls Gemini (gemini-3.8-flash) with structured JSON schema output.
  */
 async function generateStrictJson(
   ai: GoogleGenAI,
@@ -283,28 +283,17 @@ async function generateStrictJson(
     responseSchema: any;
   }
 ): Promise<{ parsed: any; modelUsed: string }> {
-  const candidateModels = Array.from(new Set([GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash']));
-  let lastError: any = null;
-
-  for (const model of candidateModels) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: params.contents,
-        config: {
-          temperature: 0,
-          systemInstruction: params.systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: params.responseSchema,
-        },
-      });
-      const parsed = JSON.parse(response.text || '{}');
-      return { parsed, modelUsed: model };
-    } catch (err: any) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error('Gemini JSON generation failed');
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: params.contents,
+    config: {
+      systemInstruction: params.systemInstruction,
+      responseMimeType: 'application/json',
+      responseSchema: params.responseSchema,
+    },
+  });
+  const parsed = JSON.parse(response.text || '{}');
+  return { parsed, modelUsed: GEMINI_MODEL };
 }
 
 // Helper to verify Firebase ID Token (JWT) strictly against Google's JWKS
