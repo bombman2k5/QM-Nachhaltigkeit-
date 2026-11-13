@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateDgnbCompliance, evaluateTestDateAge } from './dgnbEvaluation';
+import { evaluateDgnbCompliance, evaluateTestDateAge, isTmProofAccepted } from './dgnbEvaluation';
 import { verifyQuote } from './quoteVerification';
-import { extractPdfPages, buildExcerpts } from './pdfText';
+import { extractPdfPages, buildExcerpts, hasPdfMagicBytes, PDF_MAGIC_BYTES } from './pdfText';
 import {
   parseDate,
   parseVoc,
+  formatVoc,
   evaluateSvhc,
   canonicalCertificates,
   evaluateRowLevels,
@@ -410,4 +411,420 @@ test('companyVaultService enforces Admin-only roles and registered employee corp
   assert.equal(isCorporateEmailAuthorized('MITARBEITER1@KAUBIT.DE', allowedList), true);
   assert.equal(isCorporateEmailAuthorized('unbekannt@kaubit.de', allowedList), false);
 });
+
+test('F11: hasPdfMagicBytes validates %PDF- signature and rejects non-PDF inputs', () => {
+  // Valid PDF header
+  const validBuffer = Buffer.from('%PDF-1.7 ...');
+  assert.equal(hasPdfMagicBytes(validBuffer), true);
+  assert.equal(hasPdfMagicBytes(new Uint8Array(validBuffer)), true);
+
+  // Magic bytes constant
+  assert.deepEqual(PDF_MAGIC_BYTES, Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d]));
+
+  // Truncated header (%PD)
+  assert.equal(hasPdfMagicBytes(Buffer.from('%PD')), false);
+
+  // Corrupted magic bytes (%NOTPDF)
+  assert.equal(hasPdfMagicBytes(Buffer.from('%NOTPDF-1.4')), false);
+
+  // HTML / Plain text
+  assert.equal(hasPdfMagicBytes(Buffer.from('<!DOCTYPE html><html><body>%PDF-1.4</body></html>')), false);
+  assert.equal(hasPdfMagicBytes(Buffer.from('Hello world plain text')), false);
+
+  // Empty or null
+  assert.equal(hasPdfMagicBytes(Buffer.alloc(0)), false);
+  assert.equal(hasPdfMagicBytes(null as any), false);
+  assert.equal(hasPdfMagicBytes(undefined as any), false);
+});
+
+test('F11: extractPdfPages handles polymorphic input (Buffer, Uint8Array) and rejects malformed data cleanly', async () => {
+  // Corrupted string
+  const corruptRes = await extractPdfPages('SGVsbG8gV29ybGQ='); // "Hello World"
+  assert.deepEqual(corruptRes, { pages: [], hasTextLayer: false });
+
+  // Empty string
+  const emptyRes = await extractPdfPages('');
+  assert.deepEqual(emptyRes, { pages: [], hasTextLayer: false });
+
+  // Buffer input without magic bytes
+  const bufRes = await extractPdfPages(Buffer.from('Not a PDF'));
+  assert.deepEqual(bufRes, { pages: [], hasTextLayer: false });
+
+  // Uint8Array input without magic bytes
+  const uintRes = await extractPdfPages(new Uint8Array([1, 2, 3]));
+  assert.deepEqual(uintRes, { pages: [], hasTextLayer: false });
+
+  // Real PDF file as Buffer
+  const samplePdfPath = path.resolve(process.cwd(), 'tests/e2e/fixtures/dgnb_env12_matrix.pdf');
+  if (fs.existsSync(samplePdfPath)) {
+    const pdfBuf = fs.readFileSync(samplePdfPath);
+    const resultFromBuffer = await extractPdfPages(pdfBuf);
+    assert.equal(resultFromBuffer.hasTextLayer, true);
+    assert.ok(resultFromBuffer.pages.length > 0);
+
+    const resultFromUint8 = await extractPdfPages(new Uint8Array(pdfBuf));
+    assert.equal(resultFromUint8.hasTextLayer, true);
+    assert.ok(resultFromUint8.pages.length > 0);
+  }
+});
+
+test('F13: sanitizeFilename and resolveDocumentType mitigate prompt injection and directory traversal', async () => {
+  process.env.NODE_ENV = 'test';
+  process.env.VERCEL = '1';
+  const { sanitizeFilename, resolveDocumentType } = await import('../../server');
+
+  // Directory traversal
+  assert.equal(sanitizeFilename('../../../../etc/passwd'), 'passwd');
+  assert.equal(sanitizeFilename('..\\..\\..\\windows\\system32\\cmd.exe'), 'cmd.exe');
+
+  // Null bytes and control characters
+  assert.equal(sanitizeFilename('test\0file\r\n.pdf'), 'testfile.pdf');
+
+  // Script tags and quotes
+  assert.equal(sanitizeFilename('<script>alert("xss")</script>.pdf'), 'script_.pdf');
+  assert.equal(sanitizeFilename('my_document<script>.pdf'), 'my_document_script_.pdf');
+
+  // Truncation to 100 characters
+  const longName = 'a'.repeat(150) + '.pdf';
+  assert.equal(sanitizeFilename(longName).length, 100);
+
+  // Fallback for empty or invalid names
+  assert.equal(sanitizeFilename(''), 'Dokument.pdf');
+  assert.equal(sanitizeFilename('...', 'Fallback.pdf'), 'Fallback.pdf');
+  assert.equal(sanitizeFilename(null), 'Dokument.pdf');
+
+  // resolveDocumentType
+  assert.equal(resolveDocumentType('sdb'), 'sdb');
+  assert.equal(resolveDocumentType('SDB'), 'sdb');
+  assert.equal(resolveDocumentType('pruefbericht'), 'pruefbericht');
+  assert.equal(resolveDocumentType('tm'), 'tm');
+  assert.equal(resolveDocumentType('TM'), 'tm');
+  assert.equal(resolveDocumentType('allgemein'), 'allgemein');
+  assert.equal(resolveDocumentType('malicious_injection; DROP TABLE', 'allgemein'), 'allgemein');
+  assert.equal(resolveDocumentType(undefined, 'sdb'), 'sdb');
+});
+
+test('F11 & F12: validateAndDecodePdf enforces magic bytes, non-emptiness, and 20MB buffer limit', async () => {
+  const { validateAndDecodePdf, MAX_PDF_BYTES } = await import('../../server');
+
+  // Empty string
+  const emptyRes = validateAndDecodePdf('');
+  assert.equal(emptyRes.isValid, false);
+  if (!emptyRes.isValid) {
+    assert.equal(emptyRes.code, 'EMPTY_FILE');
+  }
+
+  // Null or non-string
+  const nullRes = validateAndDecodePdf(null);
+  assert.equal(nullRes.isValid, false);
+  if (!nullRes.isValid) {
+    assert.equal(nullRes.code, 'INVALID_PDF');
+  }
+
+  const numRes = validateAndDecodePdf(12345);
+  assert.equal(numRes.isValid, false);
+  if (!numRes.isValid) {
+    assert.equal(numRes.code, 'INVALID_PDF');
+  }
+
+  // Whitespace only
+  const wsRes = validateAndDecodePdf('   ');
+  assert.equal(wsRes.isValid, false);
+  if (!wsRes.isValid) {
+    assert.equal(wsRes.code, 'EMPTY_FILE');
+  }
+
+  // Empty data URI prefix
+  const emptyUriRes = validateAndDecodePdf('data:application/pdf;base64,');
+  assert.equal(emptyUriRes.isValid, false);
+  if (!emptyUriRes.isValid) {
+    assert.equal(emptyUriRes.code, 'EMPTY_FILE');
+  }
+
+  // Invalid magic bytes (plain text "Hello World")
+  const invalidMagicRes = validateAndDecodePdf(Buffer.from('Hello World').toString('base64'));
+  assert.equal(invalidMagicRes.isValid, false);
+  if (!invalidMagicRes.isValid) {
+    assert.equal(invalidMagicRes.code, 'INVALID_PDF');
+  }
+
+  // Truncated header "%PD"
+  const truncatedRes = validateAndDecodePdf(Buffer.from('%PD').toString('base64'));
+  assert.equal(truncatedRes.isValid, false);
+  if (!truncatedRes.isValid) {
+    assert.equal(truncatedRes.code, 'INVALID_PDF');
+  }
+
+  // Valid PDF header
+  const validPdfRes = validateAndDecodePdf(Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj').toString('base64'));
+  assert.equal(validPdfRes.isValid, true);
+  if (validPdfRes.isValid) {
+    assert.ok(validPdfRes.buffer.length > 0);
+    assert.ok(validPdfRes.cleanBase64.length > 0);
+  }
+
+  // Payload too large check
+  assert.equal(MAX_PDF_BYTES, 20 * 1024 * 1024);
+});
+
+/* ------------------------------------------------------------------ */
+/* Milestone 3: Technisches Merkblatt (TM) Integration (F16–F22)      */
+/* ------------------------------------------------------------------ */
+
+test('F21: isTmProofAccepted recognizes matrix rows accepting TM documentation', () => {
+  const row4 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '4')!;
+  assert.equal(isTmProofAccepted(row4.artDokumentation), true);
+
+  const row8 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '8')!;
+  assert.equal(isTmProofAccepted(row8.artDokumentation), true);
+
+  const row1 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '1')!;
+  assert.equal(isTmProofAccepted(row1.artDokumentation), true);
+
+  const row17 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '17')!;
+  assert.equal(isTmProofAccepted(row17.artDokumentation), false); // 'Herstellererklärung'
+});
+
+test('TM sole proof: DGNB Row 4 (Tapetenkleister) achieves QS 4 via TM without SDB', () => {
+  const row4 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '4')!;
+  assert.ok(row4.artDokumentation.includes('TM und/oder SDB'));
+
+  // Product documented strictly via TM: solvent-free powder adhesive
+  const tmFinding = parseVoc('Technisches Merkblatt Metylan Spezial: Reines Methylcellulose-Pulver, lösemittelfrei nach VdL-RL01. VOC-Gehalt: 0 g/l.');
+  const certs = canonicalCertificates('VdL-RL01');
+  const rowEval = evaluateRowLevels(row4, tmFinding, certs);
+
+  assert.equal(rowEval.achievedLevel, 4);
+  assert.equal(rowEval.needsManualReview, false);
+
+  const params: ParameterEvaluation[] = [
+    {
+      parameterKey: 'voc',
+      parameterName: 'VOC-Gehalt',
+      productValue: formatVoc(tmFinding),
+      requiredForQS4: row4.qs4,
+      achievedLevel: rowEval.achievedLevel,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'Nachweis über Technisches Merkblatt (TM) erbracht.',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+    {
+      parameterKey: 'svhc',
+      parameterName: 'SVHC',
+      productValue: 'Keine SVHC > 0,1 %',
+      requiredForQS4: 'SVHC ≤ 0,1 %',
+      achievedLevel: 4,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'Laut TM deklarationsfrei.',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+    {
+      parameterKey: 'label',
+      parameterName: 'Umweltzeichen',
+      productValue: 'VdL-RL01',
+      requiredForQS4: row4.qs4,
+      achievedLevel: 4,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'VdL-RL01 belegt.',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+  ];
+
+  const compliance = evaluateDgnbCompliance(params, true);
+  assert.equal(compliance.overallLevel, 4);
+  assert.equal(compliance.isBauteilekatalogKO, false);
+  assert.equal(compliance.evaluatedParameters[0].evidence?.source, 'tm');
+  assert.equal(compliance.evaluatedParameters[0].evidence?.documentType, 'tm');
+});
+
+test('TM sole proof: DGNB Row 8 achieves QS 4 when TM provides both GISCODE and EMICODE', () => {
+  const row8 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '8')!;
+  const tmText = 'Technisches Merkblatt Thomsit K 188 E: GISCODE D1. GEV-EMICODE EC1 PLUS sehr emissionsarm. VOC: < 1 g/l.';
+  const certs = canonicalCertificates(tmText);
+
+  assert.ok(certs.includes('GISCODE D1'));
+  assert.ok(certs.includes('EC1 PLUS'));
+
+  const evalLabel = evaluateLabelLevels(row8, certs);
+  assert.equal(evalLabel.achievedLevel, 4);
+
+  const vocFinding = parseVoc(tmText);
+  assert.equal(vocFinding.found, true);
+  assert.equal(vocFinding.value, 1);
+  assert.equal(vocFinding.op, '<');
+
+  const evalVoc = evaluateRowLevels(row8, vocFinding, certs);
+  assert.equal(evalVoc.achievedLevel, 4);
+});
+
+test('TM negative boundary: TM claim without third-party test report triggers KO for Row 7', () => {
+  const row7 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '7')!;
+  assert.ok(row7.artDokumentation.includes('Emissionsnachweis EN ISO 16000-9 / EN 16516'));
+
+  // TM alone with manufacturer assertion but missing test report date
+  const missingDateEval = evaluateTestDateAge('');
+  assert.equal(missingDateEval.achievedLevel, 2); // Demoted due to missing lab test report date
+  assert.equal(missingDateEval.status, 'warning');
+
+  const params: ParameterEvaluation[] = [
+    {
+      parameterKey: 'testDate',
+      parameterName: 'Emissionsprüfung',
+      productValue: 'Kein Prüfdatum im TM angegeben',
+      requiredForQS4: 'Prüfbericht ≤ 5 Jahre',
+      achievedLevel: missingDateEval.achievedLevel,
+      isBottleneck: true,
+      status: 'warning',
+      explanation: missingDateEval.explanation,
+      evidence: { source: 'tm', documentType: 'tm', verification: 'unverified' },
+    },
+  ];
+
+  const compliance = evaluateDgnbCompliance(params, true);
+  assert.equal(compliance.overallLevel, 2);
+  assert.equal(compliance.bottleneckParameter?.parameterKey, 'testDate');
+});
+
+test('TM + SDB priority: measured VOC in TM takes precedence over EU Decopaint limit in SDB', () => {
+  const sdbText = 'Sicherheitsdatenblatt Kaubit Wandfarbe: EU-Grenzwert für dieses Produkt (Kat. A/a): 30 g/l (2010).';
+  const tmText = 'Technisches Merkblatt Kaubit Wandfarbe: Lösemittelfrei nach VdL-RL01. Gemessener VOC-Gehalt: < 1 g/l.';
+
+  const sdbVoc = parseVoc(sdbText);
+  assert.equal(sdbVoc.found, false);
+  assert.equal(sdbVoc.onlyLimitValues, true); // 30 g/l is recognized as EU statutory limit, not product value
+
+  const tmVoc = parseVoc(tmText);
+  assert.equal(tmVoc.found, true);
+  assert.equal(tmVoc.value, 1);
+  assert.equal(tmVoc.op, '<');
+  assert.equal(tmVoc.solventFree, true);
+
+  // Evaluated against Row 3 (QS4 requires < 5 g/l)
+  const row3 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '3')!;
+  const evalRow3 = evaluateRowLevels(row3, tmVoc, []);
+  assert.equal(evalRow3.achievedLevel, 4); // < 1 g/l satisfies < 5 g/l (QS 4)
+});
+
+test('TM + SDB Schwachstellenprinzip: SDB SVHC disclosure demotes compliant TM to QS 1', () => {
+  const perfectTmParams: ParameterEvaluation[] = [
+    {
+      parameterKey: 'voc',
+      parameterName: 'VOC-Gehalt (aus TM)',
+      productValue: '< 1 g/l',
+      requiredForQS4: '< 5 g/l',
+      achievedLevel: 4,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'Aus TM verifiziert',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+    {
+      parameterKey: 'label',
+      parameterName: 'GISCODE / EMICODE (aus TM)',
+      productValue: 'GISCODE D1, EMICODE EC1 PLUS',
+      requiredForQS4: 'EC1 PLUS',
+      achievedLevel: 4,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'Aus TM verifiziert',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+    {
+      parameterKey: 'svhc',
+      parameterName: 'SVHC-Gehalt (aus SDB)',
+      productValue: 'Enthält 0,2 % Weichmacher (SVHC Kandidatenliste)',
+      requiredForQS4: 'SVHC ≤ 0,1 %',
+      achievedLevel: 1, // K.O. from SDB
+      isBottleneck: false,
+      status: 'fail',
+      explanation: 'SDB deklariert SVHC > 0,1 %',
+      evidence: { source: 'sdb', documentType: 'sdb', verification: 'verified' },
+    },
+  ];
+
+  const compliance = evaluateDgnbCompliance(perfectTmParams, true);
+  assert.equal(compliance.overallLevel, 1);
+  assert.equal(compliance.bottleneckParameter?.parameterKey, 'svhc');
+  assert.equal(compliance.evaluatedParameters[0].evidence?.source, 'tm');
+  assert.equal(compliance.evaluatedParameters[2].evidence?.source, 'sdb');
+});
+
+test('TM + Prüfbericht: TM technical properties combine with valid laboratory report', () => {
+  const tmData = 'Technisches Merkblatt: 1K-Silan-Parkettkleber. GISCODE RS10.';
+  const reportData = 'eco-INSTITUT Prüfbericht Nr. 2023-8472 nach DIN EN 16516: TVOC28 < 60 ug/m3. GEV-EMICODE EC1 PLUS.';
+  const reportDate = '20.09.2023';
+
+  const certs = canonicalCertificates([tmData, reportData]);
+  assert.ok(certs.includes('GISCODE RS10'));
+  assert.ok(certs.includes('EC1 PLUS'));
+
+  const dateCheck = evaluateTestDateAge(reportDate, 2026);
+  assert.equal(dateCheck.achievedLevel, 4);
+  assert.equal(dateCheck.status, 'pass');
+
+  const row8 = DEFAULT_DGNB_ENV12_MATRIX.find((r) => r.nr === '8')!;
+  const evalLabel = evaluateLabelLevels(row8, certs);
+  assert.equal(evalLabel.achievedLevel, 4);
+});
+
+test('TM + Prüfbericht: Expired lab report (> 10 years) demotes compliant TM to QS 1', () => {
+  const dateCheck = evaluateTestDateAge('10.04.2012', 2026);
+  assert.equal(dateCheck.achievedLevel, 1);
+  assert.equal(dateCheck.status, 'fail');
+
+  const params: ParameterEvaluation[] = [
+    {
+      parameterKey: 'voc',
+      parameterName: 'VOC (aus TM)',
+      productValue: '0 g/l',
+      requiredForQS4: '< 1 g/l',
+      achievedLevel: 4,
+      isBottleneck: false,
+      status: 'pass',
+      explanation: 'TM belegt',
+      evidence: { source: 'tm', documentType: 'tm', verification: 'verified' },
+    },
+    {
+      parameterKey: 'testDate',
+      parameterName: 'Alter Prüfbericht',
+      productValue: '10.04.2012',
+      requiredForQS4: '≤ 5 Jahre',
+      achievedLevel: dateCheck.achievedLevel,
+      isBottleneck: false,
+      status: 'fail',
+      explanation: dateCheck.explanation,
+      evidence: { source: 'report', documentType: 'pruefbericht', verification: 'verified' },
+    },
+  ];
+
+  const compliance = evaluateDgnbCompliance(params, true);
+  assert.equal(compliance.overallLevel, 1);
+  assert.equal(compliance.bottleneckParameter?.parameterKey, 'testDate');
+});
+
+test('Source attribution: multi-document triad assigns correct evidence source tags and extracts TM date', () => {
+  const sdbText = 'Sicherheitsdatenblatt: Enthält keine SVHC > 0,1 % w/w.';
+  const tmText = 'Technisches Merkblatt: GISCODE RS10. VOC: 0 g/l. Stand: 05/2023.';
+  const reportText = 'Prüfbericht vom 15.05.2023: EMICODE EC1 PLUS.';
+
+  const vocSource = tmText && parseVoc(tmText).found ? 'tm' : 'sdb';
+  assert.equal(vocSource, 'tm');
+
+  const svhcSource = sdbText && evaluateSvhc(sdbText).status !== 'missing' ? 'sdb' : 'tm';
+  assert.equal(svhcSource, 'sdb');
+
+  const dateSource = reportText && parseDate(reportText) ? 'report' : 'tm';
+  assert.equal(dateSource, 'report');
+
+  const tmDate = parseDate(tmText);
+  assert.ok(tmDate);
+  assert.equal(tmDate.raw, '05/2023');
+
+  const certsInTm = canonicalCertificates(tmText);
+  assert.ok(certsInTm.includes('GISCODE RS10'));
+});
+
 

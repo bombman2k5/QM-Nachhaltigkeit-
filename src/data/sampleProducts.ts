@@ -9,6 +9,18 @@ export const SAMPLE_PRODUCTS: SampleProduct[] = [
     description: 'Konservierungsmittelfreie Silikat-Innenfarbe für Allergiker. Zertifiziert mit Blauer Engel DE-UZ 102.',
     expectedLevel: 4,
     hasBauteilekatalog: true,
+    tmSnippet: `TECHNISCHES MERKBLATT
+Produkt: Caparol Sylitol Bio-Innenfarbe
+Hersteller: Caparol Farben Lacke Bautenschutz GmbH
+Anwendungsbereich: Innenwandbeschichtung für hochwertige Wohnräume, Schulen und Kindergärten.
+Eigenschaften: Konservierungsmittelfrei, hoch diffusionsfähig, geruchsarm.
+Technische Daten:
+- Dichte: ca. 1,48 g/cm³
+- pH-Wert: ca. 11
+- VOC-Gehalt: < 1 g/l VOC (lösemittel- und weichmacherfrei gem. VdL-RL01)
+- Kennzeichnung nach GISBAU: GISCODE BSW10
+- Umweltzeichen: Blauer Engel nach DE-UZ 102
+Stand: 05/2023`,
     sdbSnippet: `SICHERHEITSDATENBLATT gem. Verordnung (EG) Nr. 1907/2006 (REACH)
 Handelsname: Sylitol Bio-Innenfarbe
 Hersteller: Caparol Farben Lacke Bautenschutz GmbH
@@ -34,6 +46,16 @@ Konformität: Erfüllt alle Kriterien für schadstoffarme Beschichtungsstoffe na
     description: 'Klassische Dispersionsfarbe für Wohnräume mit VOC 28 g/l. Kein Blauer Engel vorhanden.',
     expectedLevel: 2,
     hasBauteilekatalog: false,
+    tmSnippet: `TECHNISCHES MERKBLATT
+Produkt: ProfiColor Standard Wandfarbe
+Hersteller: NordBau Lacke & Farben GmbH
+Anwendungsbereich: Wand- und Deckenanstriche im Innenbereich.
+Technische Daten:
+- Bindemittelbasis: Kunstharzdispersion
+- Dichte: ca. 1,42 g/cm³
+- VOC-Gehalt: max. 28 g/l VOC (lösemittelhaltig gem. Decopaint Kat. a)
+- Kennzeichnung: GISCODE M-DF01
+Stand: 10/2022`,
     sdbSnippet: `SICHERHEITSDATENBLATT gem. REACH
 Produkt: ProfiColor Standard Wandfarbe
 Hersteller: NordBau Lacke & Farben GmbH
@@ -55,6 +77,17 @@ Fazit: Erfüllt die Decopaint-Richtlinie. Für DGNB QS 3 (< 10 g/l) oder QS 4 (<
     description: 'Hochwertiger, sehr emissionsarmer Nass- und Haftklebstoff für PVC- und Kautschukbeläge. EMICODE EC1 PLUS.',
     expectedLevel: 4,
     hasBauteilekatalog: true,
+    tmSnippet: `TECHNISCHES MERKBLATT
+Produkt: Thomsit K 188 E Spezial-Klebstoff Extra
+Hersteller: Thomsit Bautechnik
+Anwendungsbereich: Nass- und Haftklebstoff für PVC-Designbeläge, Kautschuk und Textilbeläge auf saugfähigen und nicht saugfähigen Untergründen.
+Eigenschaften & Technische Daten:
+- Basis: Wässrige Acrylat-Polymerdispersion
+- GISCODE: D1 (lösemittelfrei nach TRGS 610)
+- EMICODE: EC1 PLUS (sehr emissionsarm)
+- VOC-Gehalt: < 1 g/l
+- Ablüftezeit: 10–20 Minuten
+Stand: 08/2023`,
     sdbSnippet: `SICHERHEITSDATENBLATT (VO 1907/2006)
 Handelsname: Thomsit K 188 E Spezial-Klebstoff Extra
 Hersteller: Thomsit
@@ -79,6 +112,16 @@ Einstufung DGNB Kriterium ENV1.2 (2023) Zeile 7: Erfüllt die höchste Qualität
     description: 'Biologisch abbaubares Betontrennmittel auf Esterbasis (OECD 302). QS 3 durch OECD 302.',
     expectedLevel: 3,
     hasBauteilekatalog: true,
+    tmSnippet: `TECHNISCHES MERKBLATT
+Produkt: Sika Trennmittel Bio-Form 15
+Hersteller: Sika Deutschland GmbH
+Anwendungsbereich: Universelles Betontrennmittel für den Hoch- und Tiefbau, Fertigteilwerke und Ortbeton.
+Technische Daten:
+- Basis: Modifizierte Pflanzenölester
+- Dichte: 0,88 g/cm³
+- GISCODE: BTM 15
+- Biologische Abbaubarkeit: Inhärent biologisch abbaubar gem. OECD 302 B
+Stand: 03/2023`,
     sdbSnippet: `SICHERHEITSDATENBLATT gem. EG 1907/2006
 Handelsname: Sika Trennmittel Bio-Form 15
 Zusammensetzung: Modifizierte Pflanzenölester und Kohlenwasserstoffe.

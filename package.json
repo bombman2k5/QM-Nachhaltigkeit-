@@ -9,7 +9,8 @@
     "start": "node dist-server/server.js",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/dgnbEvaluation.test.ts"
+    "test": "tsx --test src/utils/dgnbEvaluation.test.ts",
+    "test:e2e": "tsx tests/e2e/runner.ts"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",

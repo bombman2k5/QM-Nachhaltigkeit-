@@ -273,7 +273,7 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
                 <thead>
                   <tr className="bg-white border-b border-slate-200 text-slate-700 font-semibold">
                     <th className="py-2.5 px-4">Parameter / Schadstoff</th>
-                    <th className="py-2.5 px-4">Ermittelter Wert (SDB / Labor)</th>
+                    <th className="py-2.5 px-4">Ermittelter Wert (SDB / TM / Labor)</th>
                     <th className="py-2.5 px-4">Anforderung Höchststufe</th>
                     <th className="py-2.5 px-4 text-center">Isolierte Einstufung</th>
                     <th className="py-2.5 px-4">Erläuterung & Auswirkung</th>
@@ -319,9 +319,23 @@ export const Step3Evaluation: React.FC<Step3EvaluationProps> = ({
                               }`}
                             >
                               {param.evidence.verification === 'verified'
-                                ? `✓ Im PDF verifiziert${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
+                                ? `✓ ${
+                                    param.evidence.source === 'tm' || param.evidence.documentType === 'tm'
+                                      ? 'TM verifiziert'
+                                      : param.evidence.source === 'report' || param.evidence.documentType === 'pruefbericht'
+                                      ? 'Labor verifiziert'
+                                      : param.evidence.source === 'sdb' || param.evidence.documentType === 'sdb'
+                                      ? 'SDB verifiziert'
+                                      : 'PDF verifiziert'
+                                  }${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
                                 : param.evidence.verification === 'partial'
-                                ? `~ Teilweise belegt${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
+                                ? `~ ${
+                                    param.evidence.source === 'tm' || param.evidence.documentType === 'tm'
+                                      ? 'TM teilweise belegt'
+                                      : param.evidence.source === 'report' || param.evidence.documentType === 'pruefbericht'
+                                      ? 'Labor teilweise belegt'
+                                      : 'Teilweise belegt'
+                                  }${param.evidence.page ? ` (S. ${param.evidence.page})` : ''}`
                                 : param.evidence.verification === 'manual'
                                 ? '✎ Manuell bestätigt'
                                 : param.evidence.verification === 'no-text-layer'

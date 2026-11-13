@@ -249,9 +249,23 @@ export const Step4CustomerDocument: React.FC<Step4CustomerDocumentProps> = ({
                           {p.evidence && p.evidence.source !== 'missing' && (
                             <div className="text-[10px] font-sans text-slate-500 mt-0.5">
                               {p.evidence.verification === 'verified'
-                                ? `PDF verifiziert${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
+                                ? `${
+                                    p.evidence.source === 'tm' || p.evidence.documentType === 'tm'
+                                      ? 'TM verifiziert'
+                                      : p.evidence.source === 'report' || p.evidence.documentType === 'pruefbericht'
+                                      ? 'Labor verifiziert'
+                                      : p.evidence.source === 'sdb' || p.evidence.documentType === 'sdb'
+                                      ? 'SDB verifiziert'
+                                      : 'PDF verifiziert'
+                                  }${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
                                 : p.evidence.verification === 'partial'
-                                ? `Teilweise belegt${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
+                                ? `${
+                                    p.evidence.source === 'tm' || p.evidence.documentType === 'tm'
+                                      ? 'TM teilweise belegt'
+                                      : p.evidence.source === 'report' || p.evidence.documentType === 'pruefbericht'
+                                      ? 'Labor teilweise belegt'
+                                      : 'Teilweise belegt'
+                                  }${p.evidence.page ? ` (S. ${p.evidence.page})` : ''}`
                                 : p.evidence.verification === 'manual'
                                 ? 'Manuell bestätigt'
                                 : 'Manuell zu prüfen'}

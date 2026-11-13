@@ -9,6 +9,7 @@ export function normalizeForMatch(input: string): string {
     .normalize('NFKC')
     .toLowerCase()
     .replace(/\u00ad/g, '') // weiches Trennzeichen
+    .replace(/[-\u2010-\u2015\u2212]\s*\r?\n\s*/g, '') // Silbentrennung vor Zeilenumbruch entfernen
     .replace(/[-\u2010-\u2015\u2212]/g, '') // Bindestriche/Gedankenstriche/Silbentrennung
     .replace(/[\u2018\u2019\u201a\u201b\u201c\u201d\u201e"'`´]/g, '')
     .replace(/≤/g, '<=')
@@ -31,6 +32,15 @@ export function valueSupportedByQuote(value: string, quote: string): boolean {
   const q = normalizeForMatch(quote);
   if (!v) return false;
   if (!q) return false;
+
+  // Negation guard: Check if quote explicitly negates a positive claim/label
+  const quoteLower = (quote || '').toLowerCase();
+  const hasNegationInQuote = /\b(nicht|fehlt|ohne|kein|keine|keinen|keiner|keines|niemals)\b/i.test(quoteLower);
+  const valueHasNegationOrFree = /\b(kein|keine|ohne|nicht|lösemittelfrei|schadstofffrei|emissionsfrei|svhc-frei)\b/i.test(v);
+  if (hasNegationInQuote && !valueHasNegationOrFree) {
+    return false;
+  }
+
   if (q.includes(v)) return true;
 
   const vNums = numberTokens(value);

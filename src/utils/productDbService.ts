@@ -12,6 +12,7 @@ import { auth, db } from '../firebase/config';
 import { ParameterEvaluation, ProductEvaluationResult } from '../types/dgnb';
 import { encryptData, decryptData } from './crypto';
 import { evaluateDgnbCompliance, evaluateTestDateAge } from './dgnbEvaluation';
+import { isAdminEmail } from './companyVaultService';
 
 export const CURRENT_SCHEMA_VERSION = 2;
 
@@ -30,6 +31,7 @@ export interface StoredProductRecord {
   schemaVersion?: number;
   isProvisional?: boolean;
   selectedStandardCodes?: string[];
+  auditorEmail?: string;
 }
 
 export interface CachedEvaluationMatch {
@@ -239,6 +241,7 @@ export async function saveProductEvaluationToDb(
     schemaVersion: CURRENT_SCHEMA_VERSION,
     isProvisional: Boolean(result.isProvisional),
     selectedStandardCodes: (result.selectedStandardCodes || ['DGNB']).slice(0, 20),
+    auditorEmail: (result.auditMetadata?.auditorEmail || effectiveEmail).slice(0, 250),
   };
 
   // 1. Always save to LocalStorage (instant local cache)
@@ -350,7 +353,10 @@ export async function findProductEvaluationInDb(
 
   try {
     const auditsRef = collection(db, 'audits');
-    const q = query(auditsRef, limit(50));
+    const isUserAdmin = isAdminEmail(auth.currentUser.email);
+    const q = isUserAdmin
+      ? query(auditsRef, limit(50))
+      : query(auditsRef, where('userId', '==', auth.currentUser.uid), limit(50));
     const snapshot = await getDocs(q);
     if (!snapshot.empty) {
       const docs = snapshot.docs.map((d) => d.data() as StoredProductRecord);
@@ -398,7 +404,10 @@ export async function getAllSavedEvaluationsFromDb(): Promise<StoredProductRecor
   if (auth.currentUser) {
     try {
       const auditsRef = collection(db, 'audits');
-      const q = query(auditsRef, limit(50));
+      const isUserAdmin = isAdminEmail(auth.currentUser.email);
+      const q = isUserAdmin
+        ? query(auditsRef, limit(50))
+        : query(auditsRef, where('userId', '==', auth.currentUser.uid), limit(50));
       const snapshot = await getDocs(q);
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as StoredProductRecord;
@@ -454,7 +463,14 @@ export async function deleteProductEvaluationFromDb(
     }
     if (productName && productName.trim()) {
       const auditsRef = collection(db, 'audits');
-      const q = query(auditsRef, where('productName', '==', productName.trim()));
+      const isUserAdmin = isAdminEmail(auth.currentUser?.email);
+      const q = isUserAdmin
+        ? query(auditsRef, where('productName', '==', productName.trim()))
+        : query(
+            auditsRef,
+            where('userId', '==', auth.currentUser.uid),
+            where('productName', '==', productName.trim())
+          );
       const snapshot = await getDocs(q);
       const deletePromises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
       await Promise.all(deletePromises);

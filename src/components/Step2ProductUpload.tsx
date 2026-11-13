@@ -73,14 +73,17 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
   const [selectedStandards, setSelectedStandards] = useState<string[]>(['DGNB', 'QNG', 'BNB']);
 
   const [sdbText, setSdbText] = useState('');
+  const [tmText, setTmText] = useState('');
   const [testReportText, setTestReportText] = useState('');
 
   // Uploaded PDF files tracking
   const [sdbFile, setSdbFile] = useState<{ name: string; size: number } | null>(null);
+  const [tmFile, setTmFile] = useState<{ name: string; size: number } | null>(null);
   const [testReportFile, setTestReportFile] = useState<{ name: string; size: number } | null>(null);
 
   // Loading states
   const [isScanningSdb, setIsScanningSdb] = useState(false);
+  const [isScanningTm, setIsScanningTm] = useState(false);
   const [isScanningTestReport, setIsScanningTestReport] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -188,10 +191,12 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
 
   // Hidden file inputs
   const sdbInputRef = useRef<HTMLInputElement>(null);
+  const tmInputRef = useRef<HTMLInputElement>(null);
   const testReportInputRef = useRef<HTMLInputElement>(null);
 
   // Drag states
   const [isDraggingSdb, setIsDraggingSdb] = useState(false);
+  const [isDraggingTm, setIsDraggingTm] = useState(false);
   const [isDraggingReport, setIsDraggingReport] = useState(false);
 
   const toggleStandard = (code: string) => {
@@ -214,8 +219,9 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     });
   };
 
-  const handleDocumentScan = async (file: File, documentType: 'sdb' | 'pruefbericht') => {
-    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+  const handleDocumentScan = async (file: File, documentType: 'sdb' | 'pruefbericht' | 'tm') => {
+    // F14: Strict file validation (correct boolean logic)
+    if (!file.name.toLowerCase().endsWith('.pdf') || (Boolean(file.type) && file.type !== 'application/pdf')) {
       setErrorMessage('Bitte laden Sie eine gültige PDF-Datei hoch.');
       return;
     }
@@ -223,12 +229,12 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     const isLocalhost =
       typeof window !== 'undefined' &&
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-    const maxBytes = isLocalhost ? 35 * 1024 * 1024 : 3.2 * 1024 * 1024;
+    const maxBytes = isLocalhost ? 20 * 1024 * 1024 : 3.2 * 1024 * 1024;
 
     if (file.size > maxBytes) {
       setErrorMessage(
         isLocalhost
-          ? 'Die Datei ist zu groß (maximal 35 MB zulässig).'
+          ? 'Die Datei ist zu groß (maximal 20 MB zulässig).'
           : `Die PDF-Datei (${(file.size / (1024 * 1024)).toFixed(1)} MB) überschreitet das Vercel-Serverless-Limit von ca. 3,2 MB. Bitte komprimieren Sie das PDF oder extrahieren Sie die relevanten Seiten.`
       );
       return;
@@ -236,10 +242,10 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
 
     if (documentType === 'sdb') {
       setIsScanningSdb(true);
-      setSdbFile({ name: file.name, size: file.size });
+    } else if (documentType === 'tm') {
+      setIsScanningTm(true);
     } else {
       setIsScanningTestReport(true);
-      setTestReportFile({ name: file.name, size: file.size });
     }
     setErrorMessage(null);
 
@@ -249,6 +255,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       const res = await safeFetchJson<{
         success: boolean;
         extracted?: ExtractedDocumentData;
+        code?: string;
         message?: string;
       }>('/api/documents/parse-pdf', {
         method: 'POST',
@@ -261,56 +268,90 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       });
 
       if (res.ok && res.data?.success && res.data.extracted) {
+        if (documentType === 'sdb') {
+          setSdbFile({ name: file.name, size: file.size });
+        } else if (documentType === 'tm') {
+          setTmFile({ name: file.name, size: file.size });
+        } else {
+          setTestReportFile({ name: file.name, size: file.size });
+        }
         setPendingExtraction(res.data.extracted);
         setIsModalOpen(true);
       } else {
+        const statusCode = res.status;
+        const errCode = res.data?.code;
         const errMsg =
           res.data?.message ||
           res.error ||
-          'KI-Dokumentenscan war nicht verfügbar. Bitte tragen Sie die Produktkennwerte manuell im Bestätigungsdialog ein.';
-        setErrorMessage(errMsg);
-        const manualFallback: ExtractedDocumentData = {
-          documentType,
-          filename: file.name,
-          productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-          manufacturer: '',
-          suggestedCriteriaNr: selectedRowNr || '2',
-          vocContent: '',
-          vocTestDate: '',
-          svhcStatus: '',
-          certificates: [],
-          hasBauteilekatalog: true,
-          summarySnippet: '',
-          fieldQuotes: [],
-          warnings: [errMsg],
-        };
-        setPendingExtraction(manualFallback);
-        setIsModalOpen(true);
+          'Die Datei konnte nicht verarbeitet werden.';
+
+        // F15: Fatal validation/format/size/auth error -> reject file and rollback UI state
+        const isFatalError =
+          statusCode === 400 ||
+          statusCode === 413 ||
+          statusCode === 401 ||
+          statusCode === 403 ||
+          ['INVALID_PDF', 'PAYLOAD_TOO_LARGE', 'EMPTY_FILE', 'INVALID_DOCUMENT_TYPE'].includes(errCode || '');
+
+        if (isFatalError) {
+          setErrorMessage(errMsg);
+          if (documentType === 'sdb') {
+            setSdbFile(null);
+            if (sdbInputRef.current) sdbInputRef.current.value = '';
+          } else if (documentType === 'tm') {
+            setTmFile(null);
+            if (tmInputRef.current) tmInputRef.current.value = '';
+          } else {
+            setTestReportFile(null);
+            if (testReportInputRef.current) testReportInputRef.current.value = '';
+          }
+        } else {
+          // AI unavailable or transient service degradation (502 / 503) -> allow manual parameter entry
+          if (documentType === 'sdb') {
+            setSdbFile({ name: file.name, size: file.size });
+          } else if (documentType === 'tm') {
+            setTmFile({ name: file.name, size: file.size });
+          } else {
+            setTestReportFile({ name: file.name, size: file.size });
+          }
+          setErrorMessage(errMsg);
+          const manualFallback: ExtractedDocumentData = {
+            documentType,
+            filename: file.name,
+            productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
+            manufacturer: '',
+            suggestedCriteriaNr: selectedRowNr || '2',
+            vocContent: '',
+            vocTestDate: '',
+            svhcStatus: '',
+            certificates: [],
+            hasBauteilekatalog: true,
+            summarySnippet: '',
+            fieldQuotes: [],
+            warnings: [errMsg],
+          };
+          setPendingExtraction(manualFallback);
+          setIsModalOpen(true);
+        }
       }
     } catch (err: any) {
       const errMsg =
         'Fehler beim Scannen des PDFs: ' +
-        (err?.message || 'Bitte tragen Sie die Kennwerte manuell ein.');
+        (err?.message || 'Bitte prüfen Sie die Datei.');
       setErrorMessage(errMsg);
-      const manualFallback: ExtractedDocumentData = {
-        documentType,
-        filename: file.name,
-        productName: file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '),
-        manufacturer: '',
-        suggestedCriteriaNr: selectedRowNr || '2',
-        vocContent: '',
-        vocTestDate: '',
-        svhcStatus: '',
-        certificates: [],
-        hasBauteilekatalog: true,
-        summarySnippet: '',
-        fieldQuotes: [],
-        warnings: [errMsg],
-      };
-      setPendingExtraction(manualFallback);
-      setIsModalOpen(true);
+      if (documentType === 'sdb') {
+        setSdbFile(null);
+        if (sdbInputRef.current) sdbInputRef.current.value = '';
+      } else if (documentType === 'tm') {
+        setTmFile(null);
+        if (tmInputRef.current) tmInputRef.current.value = '';
+      } else {
+        setTestReportFile(null);
+        if (testReportInputRef.current) testReportInputRef.current.value = '';
+      }
     } finally {
       setIsScanningSdb(false);
+      setIsScanningTm(false);
       setIsScanningTestReport(false);
     }
   };
@@ -325,7 +366,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
     certificates: string[];
     hasBauteilekatalog: boolean;
     summarySnippet: string;
-    documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+    documentType: 'sdb' | 'pruefbericht' | 'tm' | 'allgemein';
     evidence: ConfirmedEvidence;
   }) => {
     // Check for product identity mismatch if a previous document already set productName
@@ -351,9 +392,9 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       setManufacturer(confirmed.manufacturer);
     }
 
-    if (!sdbText && !testReportText && confirmed.criteriaRowNr) {
+    if (!sdbText && !tmText && !testReportText && confirmed.criteriaRowNr) {
       setSelectedRowNr(confirmed.criteriaRowNr);
-    } else if (!hasMismatch && confirmed.criteriaRowNr && confirmed.documentType === 'sdb') {
+    } else if (!hasMismatch && confirmed.criteriaRowNr && (confirmed.documentType === 'sdb' || confirmed.documentType === 'tm')) {
       setSelectedRowNr(confirmed.criteriaRowNr);
     }
 
@@ -394,6 +435,19 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
         .filter(Boolean)
         .join('\n');
       setSdbText(formattedSdb);
+    } else if (confirmed.documentType === 'tm') {
+      const formattedTm = [
+        `TECHNISCHES MERKBLATT (TM): ${confirmed.productName} (${confirmed.manufacturer})`,
+        confirmed.vocContent ? `VOC-GEHALT / EMISSION: ${confirmed.vocContent}` : '',
+        confirmed.vocTestDate ? `DATUM / STAND (TM): ${confirmed.vocTestDate}` : '',
+        confirmed.svhcStatus ? `REACH / SCHADSTOFFE: ${confirmed.svhcStatus}` : '',
+        confirmed.certificates.length > 0 ? `ZERTIFIKATE / QUALITÄTEN: ${confirmed.certificates.join(', ')}` : '',
+        '',
+        confirmed.summarySnippet ? `WÖRTLICHE PDF-TEXTAUSZÜGE (TM):\n${confirmed.summarySnippet}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      setTmText(formattedTm);
     } else {
       const formattedReport = [
         `PRÜFBERICHT / ZERTIFIKATE:`,
@@ -429,8 +483,8 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       return;
     }
 
-    if (!sdbText.trim() && !testReportText.trim()) {
-      setErrorMessage('Bitte laden Sie mindestens ein Sicherheitsdatenblatt oder einen Prüfbericht hoch.');
+    if (!sdbText.trim() && !tmText.trim() && !testReportText.trim()) {
+      setErrorMessage('Bitte laden Sie mindestens ein Sicherheitsdatenblatt, Technisches Merkblatt oder einen Prüfbericht hoch.');
       return;
     }
 
@@ -466,6 +520,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           criteriaRowNr: selectedRowNr,
           vocTestDate,
           sdbText,
+          tmText,
           testReportText,
           hasBauteilekatalog,
           projectTitle: projectName,
@@ -744,7 +799,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
       )}
 
       {/* DEDICATED PDF UPLOAD SECTION */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Upload Zone 1: SDB */}
         <div
           onDragOver={(e) => {
@@ -805,6 +860,18 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
               >
                 Ersetzen
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSdbFile(null);
+                  setSdbText('');
+                  if (sdbInputRef.current) sdbInputRef.current.value = '';
+                }}
+                className="text-[11px] text-rose-600 hover:underline font-semibold ml-1 cursor-pointer"
+                title="Sicherheitsdatenblatt entfernen"
+              >
+                Löschen
+              </button>
             </div>
           ) : (
             <button
@@ -817,7 +884,91 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           )}
         </div>
 
-        {/* Upload Zone 2: Prüfbericht / Zertifikat */}
+        {/* Upload Zone 2: Technisches Merkblatt (TM) */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingTm(true);
+          }}
+          onDragLeave={() => setIsDraggingTm(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDraggingTm(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) handleDocumentScan(file, 'tm');
+          }}
+          className={`rounded-2xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center min-h-[200px] ${
+            isDraggingTm
+              ? 'border-emerald-500 bg-emerald-50/50 scale-[1.01]'
+              : tmFile
+              ? 'border-emerald-300 bg-emerald-50/30'
+              : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50/50'
+          }`}
+        >
+          <input
+            ref={tmInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleDocumentScan(file, 'tm');
+            }}
+          />
+
+          <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 mb-3">
+            <UploadCloud className="w-6 h-6" />
+          </div>
+
+          <h3 className="text-sm font-bold text-slate-900">
+            2. Technisches Merkblatt (TM) hochladen
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-xs">
+            Technisches Merkblatt oder Produktdatenblatt ablegen. GISCODE, VOC-Gehalte, Lösemittelfreiheit und Anwendungsbereich werden per KI ausgelesen.
+          </p>
+
+          {isScanningTm ? (
+            <div className="mt-4 flex items-center space-x-2 text-xs text-emerald-700 font-semibold bg-emerald-100/70 px-4 py-2 rounded-xl animate-pulse">
+              <Sparkles className="w-4 h-4 animate-spin" />
+              <span>TM wird per KI analysiert...</span>
+            </div>
+          ) : tmFile ? (
+            <div className="mt-4 flex items-center space-x-3 bg-white border border-emerald-200 px-3 py-2 rounded-xl text-xs text-slate-800 shadow-2xs">
+              <FileCheck2 className="w-4 h-4 text-emerald-600" />
+              <span className="font-mono font-medium truncate max-w-[200px]">{tmFile.name}</span>
+              <span className="text-slate-400 text-[10px]">({(tmFile.size / 1024 / 1024).toFixed(1)} MB)</span>
+              <button
+                type="button"
+                onClick={() => tmInputRef.current?.click()}
+                className="text-[11px] text-emerald-700 hover:underline font-semibold ml-1 cursor-pointer"
+              >
+                Ersetzen
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTmFile(null);
+                  setTmText('');
+                  if (tmInputRef.current) tmInputRef.current.value = '';
+                }}
+                className="text-[11px] text-rose-600 hover:underline font-semibold ml-1 cursor-pointer"
+                title="Technisches Merkblatt entfernen"
+              >
+                Löschen
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => tmInputRef.current?.click()}
+              className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+            >
+              TM-PDF auswählen
+            </button>
+          )}
+        </div>
+
+        {/* Upload Zone 3: Prüfbericht / Zertifikat */}
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -854,7 +1005,7 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           </div>
 
           <h3 className="text-sm font-bold text-slate-900">
-            2. Prüfbericht / Zertifikat hochladen
+            3. Prüfbericht / Zertifikat hochladen
           </h3>
           <p className="text-xs text-slate-500 mt-1 max-w-xs">
             Laborbericht oder Umweltzeichen-Zertifikat (Blauer Engel, EMICODE EC1 PLUS, AgBB, FSC/PEFC, Natureplus) als PDF hochladen.
@@ -876,6 +1027,18 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
                 className="text-[11px] text-emerald-700 hover:underline font-semibold ml-1 cursor-pointer"
               >
                 Ersetzen
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTestReportFile(null);
+                  setTestReportText('');
+                  if (testReportInputRef.current) testReportInputRef.current.value = '';
+                }}
+                className="text-[11px] text-rose-600 hover:underline font-semibold ml-1 cursor-pointer"
+                title="Prüfbericht entfernen"
+              >
+                Löschen
               </button>
             </div>
           ) : (
@@ -995,8 +1158,8 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
           </div>
         </div>
 
-        {/* Text areas for SDB and Test Report */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Text areas for SDB, TM and Test Report */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-900">1. Sicherheitsdatenblatt (SDB) Daten</span>
@@ -1013,7 +1176,21 @@ export const Step2ProductUpload: React.FC<Step2ProductUploadProps> = ({
 
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-900">2. Labor-Prüfbericht / Zertifikate</span>
+              <span className="text-xs font-bold text-slate-900">2. Technisches Merkblatt (TM) Daten</span>
+              <span className="text-[11px] text-slate-400">GISCODE, VOC, Stand/Datum</span>
+            </div>
+            <textarea
+              rows={8}
+              value={tmText}
+              onChange={(e) => setTmText(e.target.value)}
+              placeholder="Wird automatisch nach TM-Upload und Bestätigung befüllt oder kann hier manuell eingetragen werden..."
+              className="w-full p-3 font-mono text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-900">3. Labor-Prüfbericht / Zertifikate</span>
               <span className="text-[11px] text-slate-400">Blauer Engel, EMICODE EC1 PLUS, AgBB</span>
             </div>
             <textarea

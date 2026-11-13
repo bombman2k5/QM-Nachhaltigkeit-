@@ -59,11 +59,11 @@ export type Verification = 'verified' | 'partial' | 'unverified' | 'no-text-laye
 export type ParameterKey = 'voc' | 'testDate' | 'svhc' | 'label';
 
 export interface ParameterEvidence {
-  source?: 'sdb' | 'report' | 'manual' | 'missing';
+  source?: 'sdb' | 'tm' | 'report' | 'manual' | 'missing';
   quote?: string;
   page?: number;
   verification: Verification;
-  documentType?: 'sdb' | 'pruefbericht' | 'allgemein';
+  documentType?: 'sdb' | 'pruefbericht' | 'tm' | 'allgemein';
 }
 
 export interface ParameterEvaluation {
@@ -169,7 +169,7 @@ export interface ExtractedExcerpt {
 }
 
 export interface ExtractedDocumentData {
-  documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+  documentType: 'sdb' | 'pruefbericht' | 'tm' | 'allgemein';
   filename?: string;
   productName?: string;
   manufacturer?: string;
@@ -208,6 +208,7 @@ export interface SampleProduct {
   expectedLevel: QualityLevel;
   sdbSnippet: string;
   testReportSnippet: string;
+  tmSnippet?: string;
   hasBauteilekatalog: boolean;
 }
 

@@ -2,6 +2,16 @@ import { ParameterEvaluation, ComplianceEvaluation, QualityLevel } from '../type
 import { parseDate } from './parameterRules';
 
 /**
+ * Prüft, ob ein Technisches Merkblatt (TM) gemäß der DGNB-Kriterienmatrix (artDokumentation)
+ * als ausreichendes Nachweisdokument für die betreffende Kriterienzeile anerkannt ist.
+ * Gemäß DGNB ENV1.2 gilt "TM und/oder SDB" als anerkannte Dokumentation für Produkteigenschaften.
+ */
+export function isTmProofAccepted(artDokumentation?: string): boolean {
+  if (!artDokumentation || !artDokumentation.trim()) return true; // Standardannahme bei freien/benutzerdefinierten Zeilen
+  return /\b(tm|technisches\s*merkblatt|technisches\s*datenblatt|tdb|produktdatenblatt|pdb)\b/i.test(artDokumentation);
+}
+
+/**
  * Evaluates the age of a VOC test report / certificate against institute requirements (DGNB, AgBB, EMICODE, QNG, BNB).
  * Standard Institute Rules:
  * - <= 5 years old: Fully valid (Quality Level 4 / Pass)

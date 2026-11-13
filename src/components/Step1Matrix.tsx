@@ -68,15 +68,22 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // F14: Frontend validation for Step1Matrix
+    if (!file.name.toLowerCase().endsWith('.pdf') || (Boolean(file.type) && file.type !== 'application/pdf')) {
+      setUploadError('Bitte laden Sie eine gültige PDF-Datei hoch.');
+      e.target.value = '';
+      return;
+    }
+
     const isLocalhost =
       typeof window !== 'undefined' &&
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-    const maxBytes = isLocalhost ? 35 * 1024 * 1024 : 3.2 * 1024 * 1024;
+    const maxBytes = isLocalhost ? 20 * 1024 * 1024 : 3.2 * 1024 * 1024;
 
     if (file.size > maxBytes) {
       setUploadError(
         isLocalhost
-          ? 'Die PDF-Datei ist zu groß (maximal 35 MB zulässig).'
+          ? 'Die PDF-Datei ist zu groß (maximal 20 MB zulässig).'
           : `Die PDF-Datei (${(file.size / (1024 * 1024)).toFixed(1)} MB) überschreitet das Vercel-Serverless-Limit von ca. 3,2 MB. Bitte laden Sie nur den relevanten Kriterien-Auszug hoch.`
       );
       e.target.value = '';
@@ -129,11 +136,13 @@ export const Step1Matrix: React.FC<Step1MatrixProps> = ({
               res.error ||
               `Das Leitfaden-PDF "${file.name}" konnte nicht ausgelesen werden. Es wurden keine Kriterien überschrieben.`
           );
+          e.target.value = '';
         }
       } catch (err: any) {
         setUploadError(
           `Fehler beim Scannen von "${file.name}": ${err?.message || 'Unbekannter Fehler'}. Es wurden keine Kriterien überschrieben.`
         );
+        e.target.value = '';
       } finally {
         setIsUploading(false);
       }

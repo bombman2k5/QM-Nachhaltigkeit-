@@ -69,12 +69,41 @@ service cloud.firestore {
         && request.auth.token.email is string
         && (
           request.auth.token.email.lower() == 'brian.lackmann@kaubit.de' ||
-          request.auth.token.email.lower() == 'brianlackmann@gmail.com'
+          request.auth.token.email.lower() == 'brianlackmann@gmail.com' ||
+          request.auth.token.admin == true
         );
     }
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function canAccessCompanyVault(vaultData) {
+      return isSignedIn() && (
+        isAdmin() ||
+        (
+          ('email' in request.auth.token)
+          && request.auth.token.email is string
+          && ('authorizedEmails' in vaultData)
+          && vaultData.authorizedEmails is list
+          && (request.auth.token.email.lower() in vaultData.authorizedEmails)
+        )
+      );
+    }
+
+    function canReadAudit(auditData) {
+      return isSignedIn() && (
+        isAdmin() ||
+        auditData.userId == request.auth.uid ||
+        (
+          ('email' in request.auth.token)
+          && request.auth.token.email is string
+          && (
+            (('userEmail' in auditData) && auditData.userEmail.lower() == request.auth.token.email.lower()) ||
+            (('auditorEmail' in auditData) && auditData.auditorEmail.lower() == request.auth.token.email.lower())
+          )
+        )
+      );
     }
 
     // ===============================================================
@@ -119,6 +148,7 @@ service cloud.firestore {
         && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 10))
         && (!('isProvisional' in data) || data.isProvisional is bool)
         && (!('selectedStandardCodes' in data) || (data.selectedStandardCodes is list && data.selectedStandardCodes.size() <= 20))
+        && (!('auditorEmail' in data) || (data.auditorEmail is string && data.auditorEmail.size() <= 256))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
@@ -128,7 +158,7 @@ service cloud.firestore {
     // ===============================================================
 
     match /vault/{vaultId} {
-      allow get: if isSignedIn() && vaultId == 'company';
+      allow get: if vaultId == 'company' && canAccessCompanyVault(resource.data);
       allow create, update: if isAdmin() && vaultId == 'company' && isValidCompanyVault(request.resource.data);
       allow delete, list: if false;
     }
@@ -141,10 +171,26 @@ service cloud.firestore {
     }
 
     match /audits/{auditId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(auditId) && request.resource.data.userId == request.auth.uid && isValidProjectAudit(request.resource.data);
-      allow update: if isSignedIn() && isValidId(auditId) && (resource.data.userId == request.auth.uid || isAdmin()) && isValidProjectAudit(request.resource.data);
-      allow delete: if isSignedIn() && isValidId(auditId) && (resource.data.userId == request.auth.uid || isAdmin());
+      // Tenant Isolation: Direct reads allowed only for creator, matching email, or admin
+      allow get: if isValidId(auditId) && canReadAudit(resource.data);
+
+      // Tenant Isolation: Query lists allowed only for creator's own audits or admin
+      allow list: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && isValidId(auditId)
+        && (request.resource.data.userId == request.auth.uid || isAdmin())
+        && isValidProjectAudit(request.resource.data);
+
+      allow update: if isSignedIn()
+        && isValidId(auditId)
+        && (resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.userId == resource.data.userId
+        && isValidProjectAudit(request.resource.data);
+
+      allow delete: if isSignedIn()
+        && isValidId(auditId)
+        && (resource.data.userId == request.auth.uid || isAdmin());
     }
   }
 }

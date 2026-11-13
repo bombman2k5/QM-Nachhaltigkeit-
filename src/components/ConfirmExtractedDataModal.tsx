@@ -34,7 +34,7 @@ interface ConfirmExtractedDataModalProps {
     certificates: string[];
     hasBauteilekatalog: boolean;
     summarySnippet: string;
-    documentType: 'sdb' | 'pruefbericht' | 'allgemein';
+    documentType: 'sdb' | 'pruefbericht' | 'tm' | 'allgemein';
     evidence: ConfirmedEvidence;
   }) => void;
   onCancel: () => void;
@@ -106,14 +106,15 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
     const defaultSource =
       data.documentType === 'pruefbericht'
         ? 'report'
-        : data.documentType === 'sdb'
-        ? 'sdb'
+        : data.documentType === 'tm'
+        ? 'tm'
         : 'sdb';
 
     if (!currentVal.trim()) {
       return {
         source: 'missing',
         verification: 'unverified',
+        documentType: data.documentType,
       };
     }
 
@@ -123,6 +124,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
         quote: q?.quote,
         page: q?.page,
         verification: 'manual',
+        documentType: data.documentType,
       };
     }
 
@@ -133,6 +135,7 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
       verification:
         q?.verification ||
         (data.hasTextLayer === false ? 'no-text-layer' : 'unverified'),
+      documentType: data.documentType,
     };
   };
 
@@ -229,6 +232,8 @@ export const ConfirmExtractedDataModal: React.FC<ConfirmExtractedDataModalProps>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-800 text-emerald-200 border border-emerald-500/30">
                   {data.documentType === 'sdb'
                     ? 'Sicherheitsdatenblatt (SDB)'
+                    : data.documentType === 'tm'
+                    ? 'Technisches Merkblatt (TM)'
                     : data.documentType === 'pruefbericht'
                     ? 'Labor-Prüfbericht / Zertifikat'
                     : 'Dokumenten-Scan'}

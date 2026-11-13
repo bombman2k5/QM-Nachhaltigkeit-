@@ -48,11 +48,14 @@ export function parseDate(input: string | undefined | null): ParsedDate | null {
   const s = String(input).trim();
   if (!s) return null;
 
+  let hadInvalidDay = false;
+
   // 1. ISO
   let m = s.match(/\b(19\d\d|20\d\d)-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b/);
   if (m) {
     const d = mkDate(+m[1], +m[2] - 1, +m[3]);
     if (d) return { date: d, precision: 'day', raw: m[0] };
+    hadInvalidDay = true;
   }
 
   // 2. DD.MM.YYYY / DD/MM/YYYY / DD.MM.YY
@@ -60,6 +63,7 @@ export function parseDate(input: string | undefined | null): ParsedDate | null {
   if (m) {
     const d = mkDate(expandYear(+m[3]), +m[2] - 1, +m[1]);
     if (d) return { date: d, precision: 'day', raw: m[0] };
+    hadInvalidDay = true;
   }
 
   // 3. "15. Mai 2023"
@@ -69,7 +73,13 @@ export function parseDate(input: string | undefined | null): ParsedDate | null {
     if (mon !== undefined) {
       const d = mkDate(+x[3], mon, +x[1]);
       if (d) return { date: d, precision: 'day', raw: x[0] };
+      hadInvalidDay = true;
     }
+  }
+
+  // Do not fall back to month-only matching if a day was specified but failed calendar validation (e.g. 29.02.2023)
+  if (hadInvalidDay) {
+    return null;
   }
 
   // 4. "Mai 2023"
@@ -490,7 +500,7 @@ export function evaluateSvhc(textInput: string): { status: SvhcStatus; evidence?
     else unclear.push(c);
   }
 
-  if (present.length > 0 && none.length > 0) return { status: 'unclear', evidence: present[0] };
+  // When SDB/text explicitly declares SVHC > 0.1 %, it takes precedence over marketing claims of "SVHC-frei"
   if (present.length > 0) return { status: 'present', evidence: present[0] };
   if (none.length > 0) return { status: 'none', evidence: none[0] };
   if (unclear.length > 0) return { status: 'unclear', evidence: unclear[0] };
