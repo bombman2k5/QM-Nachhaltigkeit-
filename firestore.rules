@@ -7,12 +7,21 @@ rules_version = '2';
 // Collection: vault
 // Document ID: 'company'
 // Fields:
-//   - saltHex: string (required, 16..128 chars) - PBKDF2 salt in hex
-//   - verifierHex: string (required, 16..512 chars) - AES-GCM verifier in hex
+//   - saltHex: string (optional, <= 128 chars) - PBKDF2 salt in hex
+//   - verifierHex: string (optional, <= 512 chars) - AES-GCM verifier in hex
 //   - updatedAt: string (required, <= 64 chars) - ISO timestamp
 //   - updatedByEmail: string (optional, <= 256 chars) - Admin email
 //   - updatedByUid: string (optional, <= 128 chars) - Admin UID
 //   - authorizedEmails: list (optional, <= 500 items) - Authorized employee emails
+//
+// Collection: employees
+// Document ID: {employeeId} (normalized email key, <= 128 chars)
+// Fields:
+//   - email: string (required, 3..256 chars) - Authorized employee email
+//   - role: string (optional, <= 64 chars) - 'admin' | 'employee'
+//   - updatedAt: string (required, <= 64 chars) - ISO timestamp
+//   - addedByEmail: string (optional, <= 256 chars) - Admin email
+//   - addedByUid: string (optional, <= 128 chars) - Admin UID
 //
 // Collection: users
 // Document ID: {userId} (matches Firebase Auth UID)
@@ -111,13 +120,22 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidCompanyVault(data) {
-      return data.keys().hasAll(['saltHex', 'verifierHex', 'updatedAt'])
-        && data.saltHex is string && data.saltHex.size() >= 16 && data.saltHex.size() <= 128
-        && data.verifierHex is string && data.verifierHex.size() >= 16 && data.verifierHex.size() <= 512
+      return data.keys().hasAll(['updatedAt'])
         && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!('saltHex' in data) || (data.saltHex is string && data.saltHex.size() <= 128))
+        && (!('verifierHex' in data) || (data.verifierHex is string && data.verifierHex.size() <= 512))
         && (!('updatedByEmail' in data) || (data.updatedByEmail is string && data.updatedByEmail.size() <= 256))
         && (!('updatedByUid' in data) || (data.updatedByUid is string && data.updatedByUid.size() <= 128))
         && (!('authorizedEmails' in data) || (data.authorizedEmails is list && data.authorizedEmails.size() <= 500));
+    }
+
+    function isValidAuthorizedEmployee(data) {
+      return data.keys().hasAll(['email', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 256
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!('role' in data) || (data.role is string && data.role.size() <= 64))
+        && (!('addedByEmail' in data) || (data.addedByEmail is string && data.addedByEmail.size() <= 256))
+        && (!('addedByUid' in data) || (data.addedByUid is string && data.addedByUid.size() <= 128));
     }
 
     function isValidUserProfile(data) {
@@ -161,6 +179,12 @@ service cloud.firestore {
       allow get: if vaultId == 'company' && canAccessCompanyVault(resource.data);
       allow create, update: if isAdmin() && vaultId == 'company' && isValidCompanyVault(request.resource.data);
       allow delete, list: if false;
+    }
+
+    match /employees/{employeeId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isAdmin() && isValidId(employeeId) && isValidAuthorizedEmployee(request.resource.data);
+      allow delete: if isAdmin() && isValidId(employeeId);
     }
 
     match /users/{userId} {

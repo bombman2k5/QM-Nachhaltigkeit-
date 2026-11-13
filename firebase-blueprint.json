@@ -1,5 +1,32 @@
 {
   "entities": {
+    "companyVault": {
+      "title": "CompanyVault",
+      "description": "Company-wide zero-knowledge passphrase verifier and authorized employee email accounts",
+      "type": "object",
+      "properties": {
+        "saltHex": { "type": "string", "maxLength": 128 },
+        "verifierHex": { "type": "string", "maxLength": 512 },
+        "authorizedEmails": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedByEmail": { "type": "string", "maxLength": 256 },
+        "updatedByUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["updatedAt"]
+    },
+    "authorizedEmployee": {
+      "title": "AuthorizedEmployee",
+      "description": "Authorized corporate employee email account managed by the administrator",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "addedByEmail": { "type": "string", "maxLength": 256 },
+        "addedByUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["email", "updatedAt"]
+    },
     "userProfile": {
       "title": "UserProfile",
       "description": "Private user profile storing authentication and passphrase verification metadata",
@@ -7,9 +34,11 @@
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 256 },
+        "corporateEmail": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "maxLength": 64 },
         "hasPassphrase": { "type": "boolean" },
         "passphraseSalt": { "type": "string", "maxLength": 128 },
-        "passphraseVerifier": { "type": "string", "maxLength": 256 },
+        "passphraseVerifier": { "type": "string", "maxLength": 512 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
@@ -28,13 +57,21 @@
         "manufacturer": { "type": "string", "maxLength": 256 },
         "qualityLevel": { "type": "integer" },
         "auditDate": { "type": "string", "maxLength": 64 },
-        "encryptedPayload": { "type": "string", "maxLength": 100000 },
+        "encryptedPayload": { "type": "string", "maxLength": 200000 },
         "createdAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "userId", "userEmail", "projectName", "productName", "qualityLevel"]
     }
   },
   "firestore": {
+    "/vault/{vaultId}": {
+      "schema": "companyVault",
+      "description": "Company passphrase verifier and list of authorized employee emails"
+    },
+    "/employees/{employeeId}": {
+      "schema": "authorizedEmployee",
+      "description": "Individual employee email records authorized by the administrator"
+    },
     "/users/{userId}": {
       "schema": "userProfile",
       "description": "User profile with passphrase verifier and status"

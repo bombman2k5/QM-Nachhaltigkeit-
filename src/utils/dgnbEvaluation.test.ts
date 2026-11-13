@@ -400,7 +400,14 @@ test('revalidateCachedResult downgrades expired test reports against current yea
 });
 
 test('companyVaultService enforces Admin-only roles and registered employee corporate emails', async () => {
-  const { isAdminEmail, isCorporateEmailAuthorized } = await import('./companyVaultService');
+  const {
+    isAdminEmail,
+    isCorporateEmailAuthorized,
+    emailToEmployeeDocId,
+    normalizeEmailList,
+    verifyVaultPersistenceWithoutLocalCache,
+    LOCAL_VAULT_KEY,
+  } = await import('./companyVaultService');
 
   assert.equal(isAdminEmail('brian.lackmann@kaubit.de'), true);
   assert.equal(isAdminEmail('BrianLackmann@gmail.com'), true);
@@ -410,6 +417,58 @@ test('companyVaultService enforces Admin-only roles and registered employee corp
   assert.equal(isCorporateEmailAuthorized('mitarbeiter1@kaubit.de', allowedList), true);
   assert.equal(isCorporateEmailAuthorized('MITARBEITER1@KAUBIT.DE', allowedList), true);
   assert.equal(isCorporateEmailAuthorized('unbekannt@kaubit.de', allowedList), false);
+
+  // Verify Firestore employee document ID generation matches Firestore rule regex ^[a-zA-Z0-9_\-]+$
+  const docId = emailToEmployeeDocId('Max.Mustermann+Test@Kaubit.de');
+  assert.equal(docId, 'max_mustermann_test_at_kaubit_de');
+  assert.ok(/^[a-zA-Z0-9_-]+$/.test(docId));
+  assert.ok(docId.length <= 128);
+
+  // Verify normalizeEmailList always preserves both admins and deduplicates employee emails
+  const normalized = normalizeEmailList([
+    '  ProjektLeitung@Kaubit.de ',
+    'projektleitung@kaubit.de',
+    'invalid-email',
+  ]);
+  assert.ok(normalized.includes('brian.lackmann@kaubit.de'));
+  assert.ok(normalized.includes('brianlackmann@gmail.com'));
+  assert.ok(normalized.includes('projektleitung@kaubit.de'));
+  assert.equal(normalized.filter((e) => e === 'projektleitung@kaubit.de').length, 1);
+  assert.equal(normalized.includes('invalid-email'), false);
+
+  // Verify verifyVaultPersistenceWithoutLocalCache wipes localStorage and does not read stale localStorage
+  const mockStore: Record<string, string> = {
+    [LOCAL_VAULT_KEY]: JSON.stringify({
+      saltHex: '11223344556677889900aabbccddeeff',
+      verifierHex: '11223344556677889900aabbccddeeff',
+      authorizedEmails: ['brian.lackmann@kaubit.de', 'nur-lokal@kaubit.de'],
+      syncedToFirestore: false,
+    }),
+  };
+  (globalThis as any).localStorage = {
+    getItem: (k: string) => mockStore[k] ?? null,
+    setItem: (k: string, v: string) => {
+      mockStore[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete mockStore[k];
+    },
+  };
+
+  const reloaded = await verifyVaultPersistenceWithoutLocalCache(null, '');
+  assert.equal(mockStore[LOCAL_VAULT_KEY], undefined);
+  assert.equal(reloaded.authorizedEmails.includes('nur-lokal@kaubit.de'), false);
+  delete (globalThis as any).localStorage;
+
+  // Verify normalizeFirestoreDatabaseId fixes missing 'ai-studio-' prefix from env vars
+  const { normalizeFirestoreDatabaseId } = await import('../firebase/config');
+  assert.equal(
+    normalizeFirestoreDatabaseId(
+      'dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4',
+      'ai-studio-dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4'
+    ),
+    'ai-studio-dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4'
+  );
 });
 
 test('F11: hasPdfMagicBytes validates %PDF- signature and rejects non-PDF inputs', () => {
@@ -827,4 +886,42 @@ test('Source attribution: multi-document triad assigns correct evidence source t
   assert.ok(certsInTm.includes('GISCODE RS10'));
 });
 
+test('KAUBIT_LETTERHEAD contains complete extracted header and footer from Vorlage_wpz_neu_9a344953.pdf', async () => {
+  const { KAUBIT_LETTERHEAD, DEMO_KAUBIT_EVALUATION_RESULT } = await import(
+    '../data/kaubitLetterhead'
+  );
 
+  // Header verification
+  assert.equal(KAUBIT_LETTERHEAD.header.brandName, 'KAUBIT');
+  assert.equal(KAUBIT_LETTERHEAD.header.tagline, 'Systemabdichtungsbaustoffe');
+  assert.equal(
+    KAUBIT_LETTERHEAD.header.postalHeaderLine,
+    'KAUBIT Aktiengesellschaft · Postfach 11 48 · DE-49407 Dinklage'
+  );
+  assert.ok(
+    fs.existsSync(path.resolve(process.cwd(), 'public/assets/aistudio/kaubit-logo.png')),
+    'Extracted KAUBIT logo PNG must exist in public/assets/aistudio/kaubit-logo.png'
+  );
+
+  // Footer Column 1 & 2 verification
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.companyName, 'Kaubit Aktiengesellschaft');
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.street, 'Industriestraße 1');
+  assert.equal(KAUBIT_LETTERHEAD.footer.companyColumn.city, 'DE-49413 Dinklage');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.registerNumber, 'Abt. B Nr. 111274');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.vatId, 'USt-IdNr. DE812447898');
+  assert.equal(KAUBIT_LETTERHEAD.footer.registryColumn.taxNumber, 'Steuer-Nr. 68/203/71814');
+
+  // Footer Column 3 & 4 (7 bank accounts with BIC & IBAN)
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts.length, 7);
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts[0].bic, 'OLBODEH2XXX');
+  assert.equal(KAUBIT_LETTERHEAD.footer.bankAccounts[6].bic, 'NOLADE21BEB');
+
+  // Executive board line
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Sylvia Selting'));
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Rüdiger Selting'));
+  assert.ok(KAUBIT_LETTERHEAD.footer.boardLine.includes('Bernhard Taute'));
+
+  // Demo evaluation result for Step 4 has no pre-filled demo projectName
+  assert.equal(DEMO_KAUBIT_EVALUATION_RESULT.standardsEvaluations['DGNB'].overallLevelNum, 4);
+  assert.equal(DEMO_KAUBIT_EVALUATION_RESULT.auditMetadata.projectName, '');
+});

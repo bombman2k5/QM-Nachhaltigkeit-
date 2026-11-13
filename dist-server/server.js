@@ -1,6 +1,7 @@
 // server.ts
 import express from "express";
 import path from "path";
+import fs from "fs";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -3183,8 +3184,19 @@ var app = express();
 var rawPort = process.env.PORT || "3000";
 var isPipe = rawPort.startsWith("\\\\.\\pipe\\") || rawPort.startsWith("/");
 var PORT = isPipe ? rawPort : parseInt(rawPort, 10) || 3e3;
-var FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "gen-lang-client-0723441171";
-var GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+var defaultAppletConfig = {};
+try {
+  const cfgPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(cfgPath)) {
+    defaultAppletConfig = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+  }
+} catch {
+}
+var FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || defaultAppletConfig.projectId || "gen-lang-client-0723441171";
+var rawEnvDbId = (process.env.FIREBASE_FIRESTORE_DATABASE_ID || "").replace(/^['"]+|['"]+$/g, "").trim();
+var fallbackDbId = defaultAppletConfig.firestoreDatabaseId || "ai-studio-dgnbenv12qmprfto-9665ebc6-a4b9-418d-9d5d-967112a73de4";
+var FIRESTORE_DATABASE_ID = !rawEnvDbId ? fallbackDbId : !rawEnvDbId.startsWith("ai-studio-") && fallbackDbId.endsWith(rawEnvDbId) ? fallbackDbId : rawEnvDbId.startsWith("dgnbenv12qmprfto-") ? `ai-studio-${rawEnvDbId}` : rawEnvDbId;
+var GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use((_req, res, next) => {
@@ -3291,7 +3303,39 @@ function isAdminEmail(email) {
   if (!email) return false;
   return getAdminEmails().has(email.trim().toLowerCase());
 }
-var companyVaultState = null;
+var VAULT_DISK_PATH = path.resolve(process.cwd(), ".data", "company-vault.json");
+function loadVaultFromDisk() {
+  if (process.env.NODE_ENV?.toLowerCase() === "test") return null;
+  try {
+    if (fs.existsSync(VAULT_DISK_PATH)) {
+      const raw = fs.readFileSync(VAULT_DISK_PATH, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return {
+          saltHex: typeof parsed.saltHex === "string" ? parsed.saltHex : "",
+          verifierHex: typeof parsed.verifierHex === "string" ? parsed.verifierHex : "",
+          updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : (/* @__PURE__ */ new Date()).toISOString(),
+          updatedByEmail: typeof parsed.updatedByEmail === "string" ? parsed.updatedByEmail : "",
+          authorizedEmails: Array.isArray(parsed.authorizedEmails) ? parsed.authorizedEmails : Array.from(getAdminEmails())
+        };
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+function saveVaultToDisk(state) {
+  if (process.env.NODE_ENV?.toLowerCase() === "test") return;
+  try {
+    const dir = path.dirname(VAULT_DISK_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(VAULT_DISK_PATH, JSON.stringify(state, null, 2), "utf-8");
+  } catch {
+  }
+}
+var companyVaultState = loadVaultFromDisk();
 function getEffectiveAuthorizedEmails() {
   const admins = Array.from(getAdminEmails());
   const configured = Array.from(getConfiguredAllowedEmails());
@@ -3303,6 +3347,98 @@ function isAuthorizedEmail(email) {
   const normalized = email.trim().toLowerCase();
   if (isAdminEmail(normalized)) return true;
   return getEffectiveAuthorizedEmails().includes(normalized);
+}
+var FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
+async function fetchVaultFromFirestoreRest(idToken) {
+  if (!idToken || process.env.NODE_ENV?.toLowerCase() === "test" || idToken.startsWith("test-jwt:")) return null;
+  try {
+    const res = await fetch(`${FIRESTORE_REST_BASE}/vault/company`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${idToken}`
+      }
+    });
+    if (!res.ok) return null;
+    const docJson = await res.json();
+    const fields = docJson?.fields;
+    if (!fields) return null;
+    const saltHex = fields.saltHex?.stringValue || "";
+    const verifierHex = fields.verifierHex?.stringValue || "";
+    const updatedAt = fields.updatedAt?.stringValue || (/* @__PURE__ */ new Date()).toISOString();
+    const updatedByEmail = fields.updatedByEmail?.stringValue || "";
+    const rawEmails = fields.authorizedEmails?.arrayValue?.values?.map((v) => v?.stringValue).filter(Boolean) || [];
+    const mergedEmails = Array.from(
+      /* @__PURE__ */ new Set([
+        ...Array.from(getAdminEmails()),
+        ...rawEmails.map((e) => e.trim().toLowerCase()).filter(Boolean)
+      ])
+    );
+    const loaded = {
+      saltHex,
+      verifierHex,
+      updatedAt,
+      updatedByEmail,
+      authorizedEmails: mergedEmails
+    };
+    companyVaultState = loaded;
+    saveVaultToDisk(loaded);
+    return loaded;
+  } catch {
+    return null;
+  }
+}
+async function writeVaultToFirestoreRest(idToken, state, uid) {
+  if (!idToken || process.env.NODE_ENV?.toLowerCase() === "test" || idToken.startsWith("test-jwt:")) return false;
+  try {
+    const fields = {
+      updatedAt: { stringValue: state.updatedAt },
+      updatedByEmail: { stringValue: state.updatedByEmail || "" },
+      authorizedEmails: {
+        arrayValue: {
+          values: state.authorizedEmails.map((email) => ({ stringValue: email }))
+        }
+      }
+    };
+    if (uid) {
+      fields.updatedByUid = { stringValue: uid };
+    }
+    if (state.saltHex && state.saltHex.length >= 16 && state.verifierHex && state.verifierHex.length >= 16) {
+      fields.saltHex = { stringValue: state.saltHex };
+      fields.verifierHex = { stringValue: state.verifierHex };
+    }
+    const res = await fetch(`${FIRESTORE_REST_BASE}/vault/company`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`
+      },
+      body: JSON.stringify({ fields })
+    });
+    for (const email of state.authorizedEmails) {
+      const docId = email.trim().toLowerCase().replace(/@/g, "_at_").replace(/[^a-z0-9_-]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 120);
+      if (!docId) continue;
+      await fetch(`${FIRESTORE_REST_BASE}/employees/${docId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          fields: {
+            email: { stringValue: email },
+            role: { stringValue: isAdminEmail(email) ? "admin" : "employee" },
+            updatedAt: { stringValue: state.updatedAt },
+            addedByEmail: { stringValue: state.updatedByEmail || "" },
+            ...uid ? { addedByUid: { stringValue: uid } } : {}
+          }
+        })
+      }).catch(() => {
+      });
+    }
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 var FIREBASE_JWKS = createRemoteJWKSet(
   new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
@@ -3324,27 +3460,17 @@ function getGeminiClient() {
   return genAIClient;
 }
 async function generateStrictJson(ai, params) {
-  const candidateModels = Array.from(/* @__PURE__ */ new Set([GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.0-flash"]));
-  let lastError = null;
-  for (const model of candidateModels) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: params.contents,
-        config: {
-          temperature: 0,
-          systemInstruction: params.systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: params.responseSchema
-        }
-      });
-      const parsed = JSON.parse(response.text || "{}");
-      return { parsed, modelUsed: model };
-    } catch (err) {
-      lastError = err;
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: params.contents,
+    config: {
+      systemInstruction: params.systemInstruction,
+      responseMimeType: "application/json",
+      responseSchema: params.responseSchema
     }
-  }
-  throw lastError || new Error("Gemini JSON generation failed");
+  });
+  const parsed = JSON.parse(response.text || "{}");
+  return { parsed, modelUsed: GEMINI_MODEL };
 }
 async function verifyFirebaseToken(idToken) {
   if (!idToken || typeof idToken !== "string") return null;
@@ -3418,7 +3544,8 @@ async function requireAuth(req, res, next) {
 app.get("/api/auth/status", (_req, res) => {
   res.json({
     firebaseAuthEnabled: true,
-    projectId: FIREBASE_PROJECT_ID
+    projectId: FIREBASE_PROJECT_ID,
+    firestoreDatabaseId: FIRESTORE_DATABASE_ID
   });
 });
 app.post("/api/auth/verify-session", async (req, res) => {
@@ -3433,6 +3560,9 @@ app.post("/api/auth/verify-session", async (req, res) => {
         isAuthorized: false,
         message: "Keine g\xFCltige Firebase-Authentifizierung \xFCbermittelt."
       });
+    }
+    if (token) {
+      await fetchVaultFromFirestoreRest(token);
     }
     const userEmail = decoded.email.trim().toLowerCase();
     const isAuthorized = isAuthorizedEmail(userEmail);
@@ -3454,6 +3584,7 @@ app.post("/api/auth/verify-session", async (req, res) => {
       saltHex: companyVaultState?.saltHex || null,
       verifierHex: companyVaultState?.verifierHex || null,
       authorizedEmails: getEffectiveAuthorizedEmails(),
+      updatedAt: companyVaultState?.updatedAt || null,
       message: "Authentifizierung erfolgreich."
     });
   } catch (err) {
@@ -3487,6 +3618,8 @@ app.post("/api/auth/save-passphrase-verifier", async (req, res) => {
     if (!saltHex || !verifierHex || typeof saltHex !== "string" || typeof verifierHex !== "string" || !HEX_REGEX.test(saltHex.trim()) || !HEX_REGEX.test(verifierHex.trim())) {
       return res.status(400).json({ success: false, message: "Fehlende oder ung\xFCltige Kryptografie-Parameter (Hex-Format erforderlich)." });
     }
+    const effectiveSalt = saltHex.trim();
+    const effectiveVerifier = verifierHex.trim();
     const validNewEmails = Array.isArray(authorizedEmails) ? authorizedEmails.map((e) => String(e || "").trim().toLowerCase()).filter((e) => EMAIL_REGEX.test(e)) : getEffectiveAuthorizedEmails();
     const mergedEmails = Array.from(
       /* @__PURE__ */ new Set([
@@ -3495,15 +3628,18 @@ app.post("/api/auth/save-passphrase-verifier", async (req, res) => {
       ])
     );
     companyVaultState = {
-      saltHex: String(saltHex).trim(),
-      verifierHex: String(verifierHex).trim(),
+      saltHex: effectiveSalt,
+      verifierHex: effectiveVerifier,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
       updatedByEmail: decoded.email,
       authorizedEmails: mergedEmails
     };
+    saveVaultToDisk(companyVaultState);
+    const persistedToFirestore = token ? await writeVaultToFirestoreRest(token, companyVaultState, decoded.uid) : false;
     return res.json({
       success: true,
       authorizedEmails: mergedEmails,
+      persistedToFirestore,
       message: "Unternehmens-Verschl\xFCsselungsphrase und Mitarbeiter-Freigaben erfolgreich gesichert."
     });
   } catch (err) {
@@ -3516,7 +3652,7 @@ app.post("/api/auth/save-passphrase-verifier", async (req, res) => {
 app.post("/api/auth/manage-employees", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    const { idToken, authorizedEmails } = req.body;
+    const { idToken, saltHex, verifierHex, authorizedEmails } = req.body;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : idToken;
     const decoded = token ? await verifyFirebaseToken(token) : null;
     if (!decoded || !decoded.email) {
@@ -3538,21 +3674,19 @@ app.post("/api/auth/manage-employees", async (req, res) => {
         ...validNewEmails
       ])
     );
-    if (companyVaultState) {
-      companyVaultState.authorizedEmails = mergedEmails;
-      companyVaultState.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    } else {
-      companyVaultState = {
-        saltHex: "",
-        verifierHex: "",
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        updatedByEmail: decoded.email,
-        authorizedEmails: mergedEmails
-      };
-    }
+    companyVaultState = {
+      saltHex: String(saltHex || companyVaultState?.saltHex || "").trim(),
+      verifierHex: String(verifierHex || companyVaultState?.verifierHex || "").trim(),
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      updatedByEmail: decoded.email,
+      authorizedEmails: mergedEmails
+    };
+    saveVaultToDisk(companyVaultState);
+    const persistedToFirestore = token ? await writeVaultToFirestoreRest(token, companyVaultState, decoded.uid) : false;
     return res.json({
       success: true,
       authorizedEmails: mergedEmails,
+      persistedToFirestore,
       message: "Mitarbeiter-Konten aktualisiert."
     });
   } catch (err) {
@@ -4509,7 +4643,7 @@ app.post("/api/standards/analyze-product", requireAuth, async (req, res) => {
         auditId,
         auditDate,
         auditorEmail: verifiedAuditorEmail,
-        projectName: projectTitle || "Neubauvorhaben / Nachhaltigkeitsaudit",
+        projectName: projectTitle ? projectTitle.trim() : "",
         standardsVersionSummary: targetStandards.join(", ")
       },
       standardsEvaluations: evaluations,
